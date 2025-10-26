@@ -68,8 +68,6 @@ def db_query(query, params=None, commit=False, fetchone=False, fetchall=False):
         if commit:
             conn.commit()
             last_id = cursor.lastrowid
-            # Log to audit (if not handled by trigger)
-            # This is a good place for manual audit logs if triggers aren't used
         
         result = None
         if fetchone:
@@ -126,7 +124,12 @@ def get_user_permissions():
         WHERE r.role_name = %s
     """
     permissions = db_query(query, (user_role,), fetchall=True)
-    return [p['permission_key'] for p in permissions] if permissions else []
+    # Add a default 'view_profile' permission for all logged-in employees
+    all_permissions = [p['permission_key'] for p in permissions] if permissions else []
+    if session.get('role') != 'passenger' and session.get('role') != 'admin':
+        if 'view_profile' not in all_permissions:
+            all_permissions.insert(0, 'view_profile') # Add to start
+    return all_permissions
 
 # Make permissions available globally to templates
 @app.context_processor
@@ -150,8 +153,9 @@ def requires_permission(perm_key):
             user_role = get_user_role()
             if not has_permission(user_role, perm_key):
                 flash(f"You do not have permission to perform this action. Required permission: {perm_key}", "danger")
+                # Try to redirect back, or fall back to their main dashboard
                 dashboard_url = get_dashboard_url(user_role)
-                return redirect(url_for(dashboard_url))
+                return redirect(request.referrer or url_for(dashboard_url))
                 
             return f(*args, **kwargs)
         return decorated_function
@@ -162,18 +166,17 @@ def requires_permission(perm_key):
 # ============================================
 
 def get_dashboard_url(role_name):
-    """Normalize role name to URL and return appropriate dashboard URL."""
-    # Map role names to their dashboard endpoints
+    """
+    Normalize role name to URL and return appropriate dashboard URL.
+    This is now dynamic: admin and passenger go to their specific dashboards,
+    all other roles go to the generic, permission-based dashboard.
+    """
     role_map = {
         'admin': 'dashboard_admin',
-        'hr': 'dashboard_admin',  # HR uses same as admin for now
-        'ground staff': 'dashboard_groundstaff',
-        'engineer': 'dashboard_employee',
-        'atc': 'dashboard_employee',
         'passenger': 'dashboard_passenger',
-        'employee': 'dashboard_employee'
     }
-    return role_map.get(role_name.lower(), 'dashboard_employee')
+    # Default to 'dashboard_generic' for all other roles (e.g., engineer, hr, ground staff, new_role)
+    return role_map.get(role_name.lower(), 'dashboard_generic')
 
 def login_required(role=None):
     """Decorator to protect routes based on user role."""
@@ -295,12 +298,12 @@ def login_employee():
             if role_name:
                 role_name = role_name.lower()
             else:
-                role_name = 'employee'
+                role_name = 'employee' # Fallback role
             session['role'] = role_name
             session['emp_role_name'] = employee.get('role', 'Employee')  # Job title
             flash(f"Welcome, {employee['name']}!", "success")
             
-            # Redirect based on role using the helper function
+            # Redirect based on role using the UPDATED helper function
             dashboard_url = get_dashboard_url(role_name)
             return redirect(url_for(dashboard_url))
         else:
@@ -385,6 +388,7 @@ def dashboard_admin():
 # Employees
 @app.route('/admin/employee/add', methods=['POST'])
 @login_required(role='admin')
+@requires_permission('manage_employees')
 def add_employee():
     form = request.form
     # Get role name from role_id for the 'role' field (job title)
@@ -399,6 +403,7 @@ def add_employee():
 
 @app.route('/admin/employee/edit', methods=['POST'])
 @login_required(role='admin')
+@requires_permission('manage_employees')
 def edit_employee():
     form = request.form
     role_id = int(form.get('role_id', 0))
@@ -412,6 +417,7 @@ def edit_employee():
 # Flights
 @app.route('/admin/flight/add', methods=['POST'])
 @login_required(role='admin')
+@requires_permission('manage_flights')
 def add_flight():
     form = request.form
     db_query("INSERT INTO flight (flight_no, airline, route_id, aircraft_id, departure_time, arrival_time, base_fare) VALUES (%s, %s, %s, %s, %s, %s, %s)",
@@ -422,6 +428,7 @@ def add_flight():
 # Vendors
 @app.route('/admin/vendor/add', methods=['POST'])
 @login_required(role='admin')
+#@requires_permission('manage_vendors') # Assuming manage_vendors permission exists
 def add_vendor():
     form = request.form
     db_query("INSERT INTO vendor (name, amenity_type, terminal, location_desc) VALUES (%s, %s, %s, %s)",
@@ -432,6 +439,7 @@ def add_vendor():
 # Payroll
 @app.route('/admin/payroll/add', methods=['POST'])
 @login_required(role='admin')
+@requires_permission('manage_payroll')
 def add_payroll():
     form = request.form
     emp = db_query("SELECT salary FROM employee WHERE emp_id = %s", (form['emp_id'],), fetchone=True)
@@ -446,11 +454,10 @@ def add_payroll():
 # Admin Actions
 @app.route('/admin/flight/cancel', methods=['POST'])
 @login_required(role='admin')
+@requires_permission('manage_flights')
 def admin_cancel_flight():
     flight_id = request.form['flight_id']
     db_query("UPDATE flight SET status='Cancelled' WHERE flight_id=%s", (flight_id,), commit=True)
-    # Note: The trigger trg_audit_booking_update will handle cancelling associated bookings if needed,
-    # or this could be done via a stored procedure.
     flash("Flight marked as Cancelled.", "success")
     return redirect(url_for('dashboard_admin', page='flights'))
 
@@ -780,20 +787,47 @@ def search_amenities():
     return render_template('dashboard_passenger.html', page='amenities', data={'results': results, 'search': request.args})
 
 # ============================================
-# Employee Dashboard
+# Generic Employee Dashboard (NEW & EXPANDED)
 # ============================================
 
-@app.route('/dashboard/employee')
+@app.route('/dashboard/generic')
 @login_required()
-def dashboard_employee():
-    page = request.args.get('page', 'flights')
+def dashboard_generic():
+    """
+    A generic, permission-based dashboard for all non-admin, non-passenger roles.
+    The content displayed is determined *directly* by the permissions assigned to the user's role.
+    """
     data = {}
     emp_id = session['user_id']
+    permissions = get_user_permissions() # e.g., ['view_profile', 'add_aircraft', 'view_payroll']
     
-    # Get user permissions (available globally via context_processor)
-    permissions = get_user_permissions()
+    # Get all pages the user is allowed to see. It's just their permissions list.
+    allowed_pages = permissions
+
+    # Determine which page to show
+    page = request.args.get('page')
     
-    if page == 'flights':
+    # If no page is requested, or user doesn't have permission for it, pick the first available page as default
+    if not page or page not in allowed_pages:
+        page = allowed_pages[0] if allowed_pages else 'view_profile' # Default to profile
+    
+    data['page'] = page # Pass current page to template for highlighting
+
+    # =======================================
+    # 👤  1. My Profile Page (Default)
+    # =======================================
+    if page == 'view_profile':
+        data['profile'] = db_query("""
+            SELECT e.*, r.role_name 
+            FROM employee e
+            LEFT JOIN roles r ON e.role_id = r.role_id
+            WHERE e.emp_id = %s
+        """, (emp_id,), fetchone=True)
+
+    # =======================================
+    # ✈️  2. View Assigned Flights
+    # =======================================
+    elif page == 'view_assigned_flights':
         data['assignments'] = db_query("""
             SELECT f.flight_no, f.airline, r.source_name, r.dest_name, f.departure_time, f.gate, sa.role_on_flight
             FROM staff_assignment sa
@@ -803,29 +837,148 @@ def dashboard_employee():
             ORDER BY f.departure_time
         """, (emp_id,), fetchall=True)
     
-    elif page == 'maintenance':
-        # Show maintenance section if user has permission
-        if 'add_maintenance' in permissions or 'update_aircraft_status' in permissions:
-            data['is_maintenance'] = True
-            data['aircrafts'] = db_query("SELECT aircraft_id, registration_no, model, status FROM aircraft", fetchall=True)
-            data['logs'] = db_query("""
-                SELECT m.*, a.registration_no
-                FROM maintenance m
-                JOIN aircraft a ON m.aircraft_id = a.aircraft_id
-                WHERE m.emp_id = %s
-                ORDER BY m.maintenance_date DESC
-            """, (emp_id,), fetchall=True)
-        else:
-            data['is_maintenance'] = False
+    # =======================================
+    # 🛠️  3. Maintenance (Permission: add_maintenance)
+    # =======================================
+    elif page == 'add_maintenance': 
+        data['aircrafts'] = db_query("SELECT aircraft_id, registration_no, model, status FROM aircraft", fetchall=True)
+        data['logs'] = db_query("""
+            SELECT m.*, a.registration_no
+            FROM maintenance m
+            JOIN aircraft a ON m.aircraft_id = a.aircraft_id
+            WHERE m.emp_id = %s
+            ORDER BY m.maintenance_date DESC
+        """, (emp_id,), fetchall=True)
 
-    elif page == 'payroll':
+    # =======================================
+    # 💰  4. View Payroll (Permission: view_payroll)
+    # =======================================
+    elif page == 'view_payroll':
         data['paychecks'] = db_query("""
             SELECT * FROM payroll
             WHERE emp_id = %s
             ORDER BY pay_date DESC
         """, (emp_id,), fetchall=True)
 
-    return render_template('dashboard_employee.html', page=page, data=data)
+    # =======================================
+    # 🛫  5. Manage Aircraft (Permission: add_aircraft)
+    # =======================================
+    elif page == 'add_aircraft': 
+        data['aircraft'] = db_query("SELECT * FROM aircraft ORDER BY registration_no", fetchall=True)
+
+    # =======================================
+    # 🗺️  6. Manage Routes (Permission: add_route)
+    # =======================================
+    elif page == 'add_route':
+        data['routes'] = db_query("SELECT * FROM route ORDER BY source_code, dest_code", fetchall=True)
+
+    # =======================================
+    # 📊  7. View Reports (Permission: view_reports)
+    # =======================================
+    elif page == 'view_reports':
+        # This is the same data logic from the admin 'reports' page
+        data['passenger_summary'] = db_query("SELECT * FROM passenger_summary ORDER BY total_spent DESC", fetchall=True)
+    
+    # =======================================
+    #  NEW CONTENT BLOCKS FROM SQL SCRIPTS
+    # =======================================
+
+    # ---------------------------------------
+    # 🧑‍✈️ 8. Manage Flights (create_flights / manage_flights)
+    # ---------------------------------------
+    elif page == 'create_flights' or page == 'manage_flights':
+        # This block serves both 'create_flights' and 'manage_flights'
+        data['flights'] = db_query("SELECT * FROM upcoming_flights ORDER BY departure_time", fetchall=True)
+        data['routes'] = db_query("SELECT * FROM route", fetchall=True)
+        data['aircraft'] = db_query("SELECT * FROM aircraft WHERE status = 'Operational'", fetchall=True)
+    
+    # ---------------------------------------
+    # 🚦 9. Update Flight Status (update_flights) -- CORRECTED KEY
+    # ---------------------------------------
+    elif page == 'update_flights':
+        # Show scheduled flights that can be updated
+        data['flights'] = db_query("SELECT * FROM flight WHERE status = 'Scheduled' ORDER BY departure_time", fetchall=True)
+
+    # ---------------------------------------
+    # 💰 10. Manage Payroll (manage_payroll)
+    # ---------------------------------------
+    elif page == 'manage_payroll':
+        # Same as admin view
+        data['payrolls'] = db_query("""
+            SELECT pr.*, e.name, e.role
+            FROM payroll pr
+            JOIN employee e ON pr.emp_id = e.emp_id
+            ORDER BY pr.pay_date DESC
+        """, fetchall=True)
+        data['employees'] = db_query("SELECT emp_id, name, salary FROM employee", fetchall=True)
+
+    # ---------------------------------------
+    # 👥 11. Manage Employees (manage_employees)
+    # ---------------------------------------
+    elif page == 'manage_employees':
+        # Same as admin view
+        data['employees'] = db_query("""
+            SELECT e.*, r.role_name, r.role_id 
+            FROM employee e
+            LEFT JOIN roles r ON e.role_id = r.role_id
+            ORDER BY e.name
+        """, fetchall=True)
+        data['roles'] = db_query("SELECT * FROM roles ORDER BY role_name", fetchall=True)
+
+    # ---------------------------------------
+    # 🛡️ 12. Manage Roles (manage_roles / manage_permissions)
+    # ---------------------------------------
+    elif page == 'manage_roles' or page == 'manage_permissions':
+        # Redirect to the main admin roles page
+        return redirect(url_for('admin_roles'))
+
+    # ---------------------------------------
+    # ⚙️ 13. Update Aircraft Status (update_aircraft_status)
+    # ---------------------------------------
+    elif page == 'update_aircraft_status':
+        # Show all aircraft to update their status
+        data['aircraft'] = db_query("SELECT * FROM aircraft ORDER BY registration_no", fetchall=True)
+
+    # ---------------------------------------
+    # 📋 14. View Audit Log (view_audit)
+    # ---------------------------------------
+    elif page == 'view_audit':
+        # Same as admin view
+        data['logs'] = db_query("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 100", fetchall=True)
+
+
+    return render_template('dashboard_generic.html', data=data)
+
+# ============================================
+# Employee Actions (Protected by Permissions)
+# =Example of new actions for new permissions
+# ============================================
+
+@app.route('/employee/flight/update_status', methods=['POST'])
+@login_required()
+@requires_permission('update_flights') # CORRECTED KEY
+def update_flight_status_action(): # Renamed function to avoid conflict
+    form = request.form
+    db_query("UPDATE flight SET status = %s, gate = %s, delay_minutes = %s WHERE flight_id = %s",
+             (form['status'], form.get('gate'), form.get('delay_minutes', 0), form['flight_id']), commit=True)
+    flash("Flight status updated.", "success")
+    return redirect(url_for('dashboard_generic', page='update_flights')) # CORRECTED KEY
+
+@app.route('/employee/aircraft/update_status', methods=['POST'])
+@login_required()
+@requires_permission('update_aircraft_status')
+def update_aircraft_status():
+    form = request.form
+    db_query("UPDATE aircraft SET status = %s WHERE aircraft_id = %s",
+             (form['status'], form['aircraft_id']), commit=True)
+    flash("Aircraft status updated.", "success")
+    return redirect(url_for('dashboard_generic', page='update_aircraft_status'))
+
+# (Admin actions like add_employee, add_payroll are already protected)
+
+# ============================================
+# Existing Employee Actions (FIXED REDIRECTS)
+# ============================================
 
 @app.route('/employee/maintenance/add', methods=['POST'])
 @login_required()
@@ -843,25 +996,7 @@ def add_maintenance_log():
              (form['new_status'], form['maintenance_date'], form['aircraft_id']), commit=True)
     
     flash("Maintenance log added and aircraft status updated.", "success")
-    return redirect(url_for('dashboard_employee', page='maintenance'))
-
-# ============================================
-# Ground Staff Routes (Add Aircraft & Routes)
-# ============================================
-
-@app.route('/dashboard/groundstaff')
-@login_required()
-def dashboard_groundstaff():
-    """Ground Staff Dashboard for managing routes and aircraft."""
-    page = request.args.get('page', 'aircraft')
-    data = {}
-    
-    if page == 'aircraft':
-        data['aircraft'] = db_query("SELECT * FROM aircraft ORDER BY registration_no", fetchall=True)
-    elif page == 'routes':
-        data['routes'] = db_query("SELECT * FROM route ORDER BY source_code, dest_code", fetchall=True)
-    
-    return render_template('dashboard_groundstaff.html', page=page, data=data)
+    return redirect(url_for('dashboard_generic', page='add_maintenance'))
 
 @app.route('/groundstaff/aircraft/add', methods=['POST'])
 @login_required()
@@ -879,7 +1014,8 @@ def add_aircraft_route():
         else:
             flash(f"Error: {err.msg}", "danger")
     
-    return redirect(url_for('dashboard_groundstaff', page='aircraft'))
+    # FIX: Redirect to generic dashboard
+    return redirect(url_for('dashboard_generic', page='add_aircraft'))
 
 @app.route('/groundstaff/route/add', methods=['POST'])
 @login_required()
@@ -901,8 +1037,10 @@ def add_route_groundstaff():
         else:
             flash(f"Error: {err.msg}", "danger")
     
-    return redirect(url_for('dashboard_groundstaff', page='routes'))
+    # FIX: Redirect to generic dashboard
+    return redirect(url_for('dashboard_generic', page='add_route'))
 
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
+
