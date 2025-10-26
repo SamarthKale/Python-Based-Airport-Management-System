@@ -95,49 +95,70 @@ def db_query(query, params=None, commit=False, fetchone=False, fetchall=False):
 
 def has_permission(role_name, perm_key):
     """
-    Check if a role has a specific permission.
+    Check if a role has a specific permission (case-insensitive role check).
     Returns True if the role has the permission, False otherwise.
     """
+    if not role_name or not perm_key: # Basic check
+        return False
+        
     query = """
         SELECT 1
         FROM role_permissions rp
         JOIN roles r ON rp.role_id = r.role_id
         JOIN permissions p ON rp.permission_id = p.permission_id
-        WHERE r.role_name = %s AND p.permission_key = %s
+        WHERE LOWER(r.role_name) = LOWER(%s) AND p.permission_key = %s
         LIMIT 1
     """
     result = db_query(query, (role_name, perm_key), fetchone=True)
     return result is not None
 
-def get_user_role():
-    """Get the current user's role name from session."""
-    return session.get('role', 'passenger')
+# def get_user_role(): # No longer needed, use session['role'] directly
+#     """Get the current user's role name from session."""
+#     role_from_session = session.get('role', 'passenger')
+#     return role_from_session
+
 
 def get_user_permissions():
-    """Get all permissions for the current user's role."""
-    user_role = get_user_role()
+    """Get all permissions for the current user's role stored in session."""
+    user_role_name_from_session = session.get('role') # Get role as stored in session (e.g., 'ATC', 'Admin')
+
+    if not user_role_name_from_session:
+        print("DEBUG: No role found in session for get_user_permissions")
+        return [] # No role, no permissions
+
+    # Query using the role name stored in the session, compare case-insensitively
     query = """
         SELECT p.permission_key
         FROM role_permissions rp
         JOIN roles r ON rp.role_id = r.role_id
         JOIN permissions p ON rp.permission_id = p.permission_id
-        WHERE r.role_name = %s
+        WHERE LOWER(r.role_name) = LOWER(%s) -- Use LOWER comparison for robustness
     """
-    permissions = db_query(query, (user_role,), fetchall=True)
+    permissions = db_query(query, (user_role_name_from_session,), fetchall=True)
+
     # Add a default 'view_profile' permission for all logged-in employees
     all_permissions = [p['permission_key'] for p in permissions] if permissions else []
-    if session.get('role') != 'passenger' and session.get('role') != 'admin':
+
+    # Check user type based on session role
+    current_role_lower = user_role_name_from_session.lower()
+    if current_role_lower not in ['admin', 'passenger']:
         if 'view_profile' not in all_permissions:
             all_permissions.insert(0, 'view_profile') # Add to start
+
+    print(f"DEBUG: Permissions fetched for role '{user_role_name_from_session}': {all_permissions}") # Optional Debug
     return all_permissions
+
 
 # Make permissions available globally to templates
 @app.context_processor
 def inject_permissions():
     if 'user_id' in session:
+        # Fetch permissions dynamically each time context is needed
+        current_permissions = get_user_permissions()
+        # print(f"DEBUG: Injecting permissions into context: {current_permissions}") # Optional Debug
         return {
-            'user_permissions': get_user_permissions(),
-            'user_role': get_user_role()
+            'user_permissions': current_permissions,
+            'user_role': session.get('role') # Return role as stored in session
         }
     return {}
 
@@ -150,13 +171,28 @@ def requires_permission(perm_key):
                 flash("Please log in to access this page.", "warning")
                 return redirect(url_for('index'))
             
-            user_role = get_user_role()
-            if not has_permission(user_role, perm_key):
-                flash(f"You do not have permission to perform this action. Required permission: {perm_key}", "danger")
-                # Try to redirect back, or fall back to their main dashboard
-                dashboard_url = get_dashboard_url(user_role)
-                return redirect(request.referrer or url_for(dashboard_url))
+            # Use the role stored in session directly for permission check
+            user_role_from_session = session.get('role')
+            if not user_role_from_session:
+                 flash("Your role is not defined. Please log in again.", "danger")
+                 print("DEBUG: Role missing in session for requires_permission check.") # Debug
+                 return redirect(url_for('logout'))
+
+            # Check permission using has_permission helper
+            if not has_permission(user_role_from_session, perm_key):
+                print(f"DEBUG: Permission '{perm_key}' check FAILED for role '{user_role_from_session}'.") # Debug
+                flash(f"Access Denied: You do not have the required permission ('{perm_key}').", "danger")
+                dashboard_url = get_dashboard_url(user_role_from_session)
+                # Avoid redirect loop if already on dashboard
+                if request.endpoint == dashboard_url:
+                     # If they are already on their dashboard and lack permission for an action,
+                     # maybe just flash the message without redirecting, or redirect to a safe page.
+                     # For now, let's try redirecting back to referrer if possible.
+                     return redirect(request.referrer or url_for(dashboard_url))
+                else:
+                    return redirect(url_for(dashboard_url))
                 
+            # print(f"DEBUG: Permission '{perm_key}' check PASSED for role '{user_role_from_session}'.") # Debug
             return f(*args, **kwargs)
         return decorated_function
     return decorator
@@ -167,16 +203,22 @@ def requires_permission(perm_key):
 
 def get_dashboard_url(role_name):
     """
-    Normalize role name to URL and return appropriate dashboard URL.
-    This is now dynamic: admin and passenger go to their specific dashboards,
-    all other roles go to the generic, permission-based dashboard.
+    Return appropriate dashboard URL based on role name (case-insensitive).
     """
+    if not role_name: # Handle cases where role might be None or empty
+        print("DEBUG: get_dashboard_url called with no role_name, returning 'index'.") # Debug
+        return 'index'
+
+    role_lower = role_name.lower()
     role_map = {
         'admin': 'dashboard_admin',
         'passenger': 'dashboard_passenger',
     }
-    # Default to 'dashboard_generic' for all other roles (e.g., engineer, hr, ground staff, new_role)
-    return role_map.get(role_name.lower(), 'dashboard_generic')
+    # Default to 'dashboard_generic' for all other roles
+    dashboard = role_map.get(role_lower, 'dashboard_generic')
+    # print(f"DEBUG: get_dashboard_url resolved role '{role_name}' to endpoint '{dashboard}'.") # Debug
+    return dashboard
+
 
 def login_required(role=None):
     """Decorator to protect routes based on user role."""
@@ -187,11 +229,13 @@ def login_required(role=None):
                 flash("Please log in to access this page.", "warning")
                 return redirect(url_for('index'))
             
-            if role and session.get('role') != role:
-                flash(f"You do not have permission to access this page. Requires '{role}' role.", "danger")
-                # Redirect to their own dashboard
-                user_role = session.get('role', 'passenger')
-                dashboard_url = get_dashboard_url(user_role)
+            # Compare roles case-insensitively if a specific role is required
+            session_role = session.get('role')
+            if role and (not session_role or session_role.lower() != role.lower()):
+                flash(f"Access denied. Requires '{role}' role.", "danger")
+                print(f"DEBUG: login_required failed. Session role '{session_role}' != required role '{role}'.") # Debug
+                user_role_for_redirect = session_role or 'passenger' # Fallback
+                dashboard_url = get_dashboard_url(user_role_for_redirect)
                 return redirect(url_for(dashboard_url))
                 
             return f(*args, **kwargs)
@@ -205,23 +249,47 @@ def login_required(role=None):
 @app.route('/')
 def index():
     if 'user_id' in session:
-        role = session.get('role', 'passenger')
-        dashboard_endpoint = get_dashboard_url(role)
-        return redirect(url_for(dashboard_endpoint))
+        role = session.get('role') # Use role from session
+        if not role:
+             print("DEBUG: Role missing in session at index route. Logging out.") # Debug
+             session.clear()
+             return render_template('index.html')
+
+        dashboard_endpoint = get_dashboard_url(role) # Use helper
+        # Ensure endpoint exists before redirecting
+        try:
+             # Check if the endpoint function exists
+             view_func = app.view_functions.get(dashboard_endpoint)
+             if view_func:
+                 # print(f"DEBUG: Redirecting logged-in user (role: {role}) to {dashboard_endpoint}") # Debug
+                 return redirect(url_for(dashboard_endpoint))
+             else:
+                  print(f"ERROR: Dashboard endpoint '{dashboard_endpoint}' not found for role '{role}'. Logging out.") # Debug Error
+                  flash("Configuration error: Your dashboard endpoint is missing. Please contact support.", "danger")
+                  session.clear() # Log out if dashboard is invalid
+                  return render_template('index.html')
+        except Exception as e:
+             print(f"ERROR: Exception resolving dashboard URL '{dashboard_endpoint}': {e}. Logging out.") # Debug Error
+             flash("An error occurred while redirecting to your dashboard.", "danger")
+             session.clear()
+             return render_template('index.html')
+
     return render_template('index.html')
+
 
 @app.route('/login/admin', methods=['GET', 'POST'])
 def login_admin():
     if request.method == 'POST':
         username = request.form['username']
-        password = request.form['password']
+        password = request.form['password'] # NOTE: Passwords should be hashed in production!
         
+        # In production, compare hashed password
         admin = db_query("SELECT * FROM admin WHERE username = %s AND password = %s", (username, password), fetchone=True)
         
         if admin:
             session['user_id'] = admin['admin_id']
             session['name'] = admin['full_name']
-            session['role'] = 'admin'
+            session['role'] = 'Admin' # Store with consistent casing (matching roles table if needed)
             flash(f"Welcome, {admin['full_name']}!", "success")
             return redirect(url_for('dashboard_admin'))
         else:
@@ -267,7 +335,7 @@ def login_passenger():
         if passenger:
             session['user_id'] = passenger['passenger_id']
             session['name'] = passenger['name']
-            session['role'] = 'passenger'
+            session['role'] = 'Passenger' # Store with consistent casing (matching roles table)
             flash(f"Welcome, {passenger['name']}!", "success")
             return redirect(url_for('dashboard_passenger'))
         else:
@@ -292,41 +360,62 @@ def login_employee():
         if employee:
             session['user_id'] = employee['emp_id']
             session['name'] = employee['name']
-            # Store role from database (could be Engineer, ATC, HR, Ground Staff, etc.)
-            role_name = employee.get('role_name', 'employee')
-            # Handle None case safely
-            if role_name:
-                role_name = role_name.lower()
+            # Store the canonical role name from the DB (e.g., 'ATC', 'Engineer', 'Admin')
+            # This name is crucial for permission checks
+            db_role_name = employee.get('role_name')
+
+            if not db_role_name: # If role_id was NULL or invalid
+                print(f"ERROR: Employee {email} logged in but has no valid role assigned in DB. Denying access.") # Debug Error
+                flash("Login failed: No valid role assigned. Please contact administrator.", "danger")
+                return redirect(url_for('login_employee')) # Stay on login page
             else:
-                role_name = 'employee' # Fallback role
-            session['role'] = role_name
-            session['emp_role_name'] = employee.get('role', 'Employee')  # Job title
+                 session['role'] = db_role_name # Store the actual role name (e.g., ATC)
+                 print(f"DEBUG: Storing role '{db_role_name}' in session for user {email}") # Debug
+
+            session['emp_role_name'] = employee.get('role', db_role_name) # Job title (can differ from system role, fallback to system role)
             flash(f"Welcome, {employee['name']}!", "success")
             
-            # Redirect based on role using the UPDATED helper function
-            dashboard_url = get_dashboard_url(role_name)
+            # Redirect based on the actual role name from DB stored in session
+            dashboard_url = get_dashboard_url(session['role']) 
+            print(f"DEBUG: Redirecting user {email} (role: {session['role']}) to {dashboard_url}") # Debug
             return redirect(url_for(dashboard_url))
         else:
             flash("Invalid email or date of joining.", "danger")
             
     return render_template('login_employee.html')
 
+
 @app.route('/logout')
 def logout():
+    role = session.get('role') # Get role before clearing
     session.clear()
     flash("You have been logged out.", "success")
-    return redirect(url_for('index'))
+    # Redirect to appropriate login page based on previous role? Or just index.
+    # if role and role.lower() == 'admin':
+    #     return redirect(url_for('login_admin'))
+    # elif role and role.lower() == 'passenger':
+    #      return redirect(url_for('login_passenger'))
+    # elif role: # Any other employee role
+    #      return redirect(url_for('login_employee'))
+    return redirect(url_for('index')) # Simple redirect to index
 
 # ============================================
 # Admin Dashboard & CRUD
 # ============================================
 
 @app.route('/dashboard/admin')
-@login_required(role='admin')
+@login_required(role='Admin') # Use consistent casing matching session role
 def dashboard_admin():
     """Main admin dashboard page. Uses 'page' query param to render different sections."""
     page = request.args.get('page', 'dashboard')
     data = {}
+    
+    # Permission checks for accessing admin sections (optional but good practice)
+    current_admin_role = session['role'] # Should be 'Admin'
+    # Example:
+    # if page == 'employees' and not has_permission(current_admin_role, 'manage_employees'):
+    #     flash("Access Denied: You lack 'manage_employees' permission.", "danger")
+    #     return redirect(url_for('dashboard_admin', page='dashboard'))
     
     if page == 'dashboard':
         stats = {
@@ -387,39 +476,46 @@ def dashboard_admin():
 
 # Employees
 @app.route('/admin/employee/add', methods=['POST'])
-@login_required(role='admin')
+@login_required(role='Admin') 
 @requires_permission('manage_employees')
 def add_employee():
     form = request.form
-    # Get role name from role_id for the 'role' field (job title)
     role_id = int(form.get('role_id', 0))
-    role_name = form.get('role_name', 'Employee')  # Job title/position
-    
+    job_title = form.get('role_name', 'Employee')  # Job title/position from form
+
     # Insert employee with role_id linking to roles table
     db_query("INSERT INTO employee (name, role, role_id, email, date_of_joining, salary) VALUES (%s, %s, %s, %s, %s, %s)",
-             (form['name'], role_name, role_id if role_id > 0 else None, form['email'], form['date_of_joining'], form['salary']), commit=True)
+             (form['name'], job_title, role_id if role_id > 0 else None, form['email'], form['date_of_joining'], form['salary']), commit=True)
     flash("Employee added successfully.", "success")
     return redirect(url_for('dashboard_admin', page='employees'))
 
+
 @app.route('/admin/employee/edit', methods=['POST'])
-@login_required(role='admin')
+@login_required(role='Admin') 
 @requires_permission('manage_employees')
 def edit_employee():
     form = request.form
     role_id = int(form.get('role_id', 0))
-    role_name = form.get('role_name', 'Employee')  # Job title
+    job_title = form.get('role_name', 'Employee')  # Job title from form
     
     db_query("UPDATE employee SET name=%s, role=%s, role_id=%s, email=%s, date_of_joining=%s, salary=%s WHERE emp_id=%s",
-             (form['name'], role_name, role_id if role_id > 0 else None, form['email'], form['date_of_joining'], form['salary'], form['emp_id']), commit=True)
+             (form['name'], job_title, role_id if role_id > 0 else None, form['email'], form['date_of_joining'], form['salary'], form['emp_id']), commit=True)
     flash("Employee updated successfully.", "success")
     return redirect(url_for('dashboard_admin', page='employees'))
 
+
 # Flights
 @app.route('/admin/flight/add', methods=['POST'])
-@login_required(role='admin')
+@login_required(role='Admin') 
 @requires_permission('manage_flights')
 def add_flight():
     form = request.form
+    # Basic validation before DB call
+    required_fields = ['flight_no', 'airline', 'route_id', 'aircraft_id', 'departure_time', 'arrival_time', 'base_fare']
+    if not all(form.get(field) for field in required_fields):
+        flash("Missing required flight details.", "danger")
+        return redirect(url_for('dashboard_admin', page='flights'))
+        
     db_query("INSERT INTO flight (flight_no, airline, route_id, aircraft_id, departure_time, arrival_time, base_fare) VALUES (%s, %s, %s, %s, %s, %s, %s)",
              (form['flight_no'], form['airline'], form['route_id'], form['aircraft_id'], form['departure_time'], form['arrival_time'], form['base_fare']), commit=True)
     flash("Flight added successfully.", "success")
@@ -427,10 +523,15 @@ def add_flight():
 
 # Vendors
 @app.route('/admin/vendor/add', methods=['POST'])
-@login_required(role='admin')
-#@requires_permission('manage_vendors') # Assuming manage_vendors permission exists
+@login_required(role='Admin') 
+#@requires_permission('manage_vendors') # Add this permission if needed
 def add_vendor():
     form = request.form
+    # Basic validation
+    if not form.get('name') or not form.get('amenity_type') or not form.get('terminal') or not form.get('location_desc'):
+         flash("Missing required vendor details.", "danger")
+         return redirect(url_for('dashboard_admin', page='vendors'))
+
     db_query("INSERT INTO vendor (name, amenity_type, terminal, location_desc) VALUES (%s, %s, %s, %s)",
              (form['name'], form['amenity_type'], form['terminal'], form['location_desc']), commit=True)
     flash("Vendor added successfully.", "success")
@@ -438,35 +539,53 @@ def add_vendor():
 
 # Payroll
 @app.route('/admin/payroll/add', methods=['POST'])
-@login_required(role='admin')
+@login_required(role='Admin') 
 @requires_permission('manage_payroll')
 def add_payroll():
     form = request.form
-    emp = db_query("SELECT salary FROM employee WHERE emp_id = %s", (form['emp_id'],), fetchone=True)
+    emp_id = form.get('emp_id')
+    pay_date = form.get('pay_date')
+    bonus = form.get('bonus', 0.0)
+    deductions = form.get('deductions', 0.0)
+
+    if not emp_id or not pay_date:
+        flash("Missing employee ID or pay date.", "danger")
+        return redirect(url_for('dashboard_admin', page='payroll'))
+
+    emp = db_query("SELECT salary FROM employee WHERE emp_id = %s", (emp_id,), fetchone=True)
     if emp:
         db_query("INSERT INTO payroll (emp_id, base_salary, bonus, deductions, pay_date) VALUES (%s, %s, %s, %s, %s)",
-                 (form['emp_id'], emp['salary'], form['bonus'], form['deductions'], form['pay_date']), commit=True)
+                 (emp_id, emp['salary'], bonus, deductions, pay_date), commit=True)
         flash("Payroll entry added.", "success")
     else:
-        flash("Employee not found.", "danger")
+        flash(f"Employee with ID {emp_id} not found.", "danger")
     return redirect(url_for('dashboard_admin', page='payroll'))
 
 # Admin Actions
 @app.route('/admin/flight/cancel', methods=['POST'])
-@login_required(role='admin')
+@login_required(role='Admin') 
 @requires_permission('manage_flights')
 def admin_cancel_flight():
-    flight_id = request.form['flight_id']
-    db_query("UPDATE flight SET status='Cancelled' WHERE flight_id=%s", (flight_id,), commit=True)
-    flash("Flight marked as Cancelled.", "success")
+    flight_id = request.form.get('flight_id')
+    if not flight_id:
+        flash("No flight ID specified for cancellation.", "danger")
+        return redirect(url_for('dashboard_admin', page='flights'))
+        
+    db_query("UPDATE flight SET status='Cancelled' WHERE flight_id=%s AND status = 'Scheduled'", (flight_id,), commit=True) # Only cancel scheduled flights
+    # Consider checking affected rows to confirm cancellation
+    flash("Flight marked as Cancelled (if it was scheduled).", "success")
     return redirect(url_for('dashboard_admin', page='flights'))
 
 @app.route('/admin/run_status_update', methods=['POST'])
-@login_required(role='admin')
+@login_required(role='Admin') 
 def run_status_update():
     """Manually triggers the flight status update procedure."""
-    db_query("CALL sp_update_flight_statuses()", commit=True)
-    flash("Flight statuses updated (Completed/Cancelled) based on time.", "success")
+    try:
+        db_query("CALL sp_update_flight_statuses()", commit=True)
+        flash("Flight statuses update procedure executed.", "success")
+    except Exception as e:
+         flash(f"Error executing status update procedure: {e}", "danger")
+         print(f"ERROR calling sp_update_flight_statuses: {e}") # Debug Error
     return redirect(url_for('dashboard_admin', page='flights'))
 
 # ============================================
@@ -474,7 +593,7 @@ def run_status_update():
 # ============================================
 
 @app.route('/admin/roles', methods=['GET'])
-@login_required(role='admin')
+@login_required(role='Admin') 
 @requires_permission('manage_roles')
 def admin_roles():
     """View and manage roles and their permissions."""
@@ -482,75 +601,118 @@ def admin_roles():
     permissions = db_query("SELECT * FROM permissions ORDER BY permission_key", fetchall=True)
     
     # Attach assigned permissions to each role
-    for r in roles:
-        query = """
-            SELECT permission_id 
-            FROM role_permissions 
-            WHERE role_id = %s
-        """
-        assigned = db_query(query, (r['role_id'],), fetchall=True)
-        r['assigned_perms'] = [a['permission_id'] for a in assigned] if assigned else []
+    if roles: # Check if roles list is not empty
+        for r in roles:
+            query = """
+                SELECT permission_id 
+                FROM role_permissions 
+                WHERE role_id = %s
+            """
+            assigned = db_query(query, (r['role_id'],), fetchall=True)
+            r['assigned_perms'] = [a['permission_id'] for a in assigned] if assigned else []
     
-    return render_template('dashboard_admin_roles.html', roles=roles, permissions=permissions)
+    return render_template('dashboard_admin_roles.html', roles=roles or [], permissions=permissions or [])
+
 
 @app.route('/admin/roles/update', methods=['POST'])
-@login_required(role='admin')
+@login_required(role='Admin') 
 @requires_permission('manage_roles')
 def update_role_permissions():
     """Update permissions for all roles."""
-    roles = db_query("SELECT * FROM roles", fetchall=True)
-    permissions = db_query("SELECT * FROM permissions", fetchall=True)
-    
-    for r in roles:
-        for p in permissions:
-            checkbox = f"perm_{r['role_id']}_{p['permission_id']}"
-            if checkbox in request.form:
-                # Grant permission using stored procedure
-                db_query("CALL grant_permission(%s, %s)", (r['role_id'], p['permission_key']), commit=True)
-            else:
-                # Revoke permission using stored procedure
-                db_query("CALL revoke_permission(%s, %s)", (r['role_id'], p['permission_key']), commit=True)
-    
-    flash("Permissions updated successfully.", "success")
+    print("--- Starting update_role_permissions ---") # DEBUG
+    # Limit logging form data if it gets too large in production
+    # print("Form data received:", request.form)       # DEBUG
+
+    roles = db_query("SELECT role_id, role_name FROM roles", fetchall=True) # Fetch only needed fields
+    permissions = db_query("SELECT permission_id, permission_key FROM permissions", fetchall=True) # Fetch only needed fields
+
+    if not roles or not permissions:
+        flash("Error fetching roles or permissions.", "danger")
+        print("--- ERROR: Could not fetch roles or permissions ---") # DEBUG Error
+        return redirect(url_for('admin_roles'))
+
+    try: 
+        for r in roles:
+            for p in permissions:
+                checkbox = f"perm_{r['role_id']}_{p['permission_id']}"
+                permission_key = p['permission_key'] 
+                role_id = r['role_id']
+
+                should_have_perm = checkbox in request.form
+
+                if should_have_perm: 
+                    # print(f"Attempting to GRANT '{permission_key}' to role_id {role_id}") # DEBUG
+                    result = db_query("CALL grant_permission(%s, %s)", (role_id, permission_key), commit=True)
+                    # Optional: Check result if procedure returns status
+                else: 
+                    # print(f"Attempting to REVOKE '{permission_key}' from role_id {role_id}") # DEBUG
+                    result = db_query("CALL revoke_permission(%s, %s)", (role_id, permission_key), commit=True)
+                    # Optional: Check result
+
+        flash("Permissions updated successfully.", "success")
+        print("--- Finished update_role_permissions successfully ---") # DEBUG
+
+    except Exception as e:
+        flash(f"An error occurred while updating permissions: {e}", "danger")
+        print(f"--- ERROR in update_role_permissions: {e} ---") # DEBUG Error
+        # Log the full traceback for detailed debugging
+        import traceback
+        traceback.print_exc()
+
+
     return redirect(url_for('admin_roles'))
 
+
 @app.route('/admin/role/add', methods=['POST'])
-@login_required(role='admin')
+@login_required(role='Admin') 
 @requires_permission('manage_roles')
 def add_role():
     """Add a new role."""
-    role_name = request.form['role_name']
+    role_name = request.form.get('role_name')
     description = request.form.get('description', '')
     
     try:
+        if not role_name or not role_name.strip():
+             flash("Role name cannot be empty.", "danger")
+             return redirect(url_for('admin_roles'))
+
         db_query("INSERT INTO roles (role_name, description) VALUES (%s, %s)", 
-                (role_name, description), commit=True)
-        flash(f"Role '{role_name}' created successfully.", "success")
+                (role_name.strip(), description), commit=True) 
+        flash(f"Role '{role_name.strip()}' created successfully.", "success")
     except mysql.connector.Error as err:
         if err.errno == 1062:  # Duplicate entry
-            flash(f"Role '{role_name}' already exists.", "danger")
+            flash(f"Role '{role_name.strip()}' already exists.", "danger")
         else:
             flash(f"Error creating role: {err.msg}", "danger")
+            print(f"ERROR adding role: {err}") # Debug Error
     
     return redirect(url_for('admin_roles'))
 
+
 @app.route('/admin/permission/add', methods=['POST'])
-@login_required(role='admin')
+@login_required(role='Admin') 
 @requires_permission('manage_permissions')
 def add_permission():
     """Add a new permission."""
-    permission_key = request.form['permission_key']
+    permission_key = request.form.get('permission_key')
     description = request.form.get('description', '')
     
     try:
+        if not permission_key or not permission_key.strip():
+             flash("Permission key cannot be empty.", "danger")
+             return redirect(url_for('admin_roles'))
+             
+        # Optional: Add validation for permission key format (e.g., lowercase, underscores)
+
         db_query("INSERT INTO permissions (permission_key, description) VALUES (%s, %s)", 
-                (permission_key, description), commit=True)
-        flash(f"Permission '{permission_key}' created successfully.", "success")
+                (permission_key.strip(), description), commit=True) 
+        flash(f"Permission '{permission_key.strip()}' created successfully.", "success")
     except mysql.connector.Error as err:
         if err.errno == 1062:  # Duplicate entry
-            flash(f"Permission '{permission_key}' already exists.", "danger")
+            flash(f"Permission '{permission_key.strip()}' already exists.", "danger")
         else:
             flash(f"Error creating permission: {err.msg}", "danger")
+            print(f"ERROR adding permission: {err}") # Debug Error
     
     return redirect(url_for('admin_roles'))
 
@@ -560,7 +722,7 @@ def add_permission():
 # ============================================
 
 @app.route('/dashboard/passenger', methods=['GET'])
-@login_required(role='passenger')
+@login_required(role='Passenger') 
 def dashboard_passenger():
     page = request.args.get('page', 'search')
     passenger_id = session['user_id']
@@ -570,30 +732,8 @@ def dashboard_passenger():
     # ✈️  1. Search Flights Page
     # =======================================
     if page == 'search':
-        data['results'] = []
-        data['search'] = {'source': '', 'destination': '', 'date': ''}
-
-        source = request.args.get('source', '')
-        destination = request.args.get('destination', '')
-        date = request.args.get('date', '')
-
-        if source or destination or date:
-            query = "SELECT * FROM upcoming_flights WHERE status = 'Scheduled'"
-            params = []
-
-            if source:
-                query += " AND (source_code = %s OR source_name LIKE %s)"
-                params.extend([source, f'%{source}%'])
-            if destination:
-                query += " AND (dest_code = %s OR dest_name LIKE %s)"
-                params.extend([destination, f'%{destination}%'])
-            if date:
-                query += " AND DATE(departure_time) = %s"
-                params.append(date)
-
-            query += " ORDER BY departure_time"
-            data['results'] = db_query(query, tuple(params), fetchall=True) or []
-            data['search'] = {'source': source, 'destination': destination, 'date': date}
+         # Delegate to the search function
+         return search_flights()
 
     # =======================================
     # 🧾  2. My Bookings Page
@@ -624,22 +764,20 @@ def dashboard_passenger():
     # 🏬  3. Amenities Page
     # =======================================
     elif page == 'amenities':
-        data['vendors'] = []
-        data['search'] = {'terminal': ''}
-        terminal = request.args.get('terminal', '')
+        # Delegate to the search function
+        return search_amenities()
 
-        if terminal:
-            data['vendors'] = db_query(
-                "SELECT * FROM vendor WHERE terminal LIKE %s ORDER BY name",
-                (f'%{terminal}%',),
-                fetchall=True
-            )
-            data['search'] = {'terminal': terminal}
 
     # =======================================
     # 👤  4. Profile Page
     # =======================================
     elif page == 'profile':
+        # Added permission check for passengers to view/edit their profile
+        # Use session['role'] which should be 'Passenger'
+        if not has_permission(session['role'], 'edit_profile'): 
+            flash("You don't have permission to view your profile details.", "warning")
+            return redirect(url_for('dashboard_passenger', page='search')) 
+
         profile = db_query("""
             SELECT 
                 p.name,
@@ -652,17 +790,24 @@ def dashboard_passenger():
             LEFT JOIN booking b ON p.passenger_id = b.passenger_id
             LEFT JOIN payment pay ON b.booking_id = pay.booking_id
             WHERE p.passenger_id = %s
-            GROUP BY p.passenger_id
+            GROUP BY p.passenger_id, p.name, p.email, p.passport_no, p.total_points -- Added all non-aggregated columns
         """, (passenger_id,), fetchone=True) or {}
         data['profile'] = profile
 
     # =======================================
     # ✅ Render Template Safely
     # =======================================
-    return render_template('dashboard_passenger.html', page=page, data=data or {})
+    # Only render if not delegated to another function
+    if page in ['bookings', 'profile']:
+        return render_template('dashboard_passenger.html', page=page, data=data or {})
+    else:
+        # If page wasn't 'search' or 'amenities' (which return directly), it's an invalid page
+        flash(f"Invalid page requested: {page}", "warning")
+        return redirect(url_for('dashboard_passenger', page='search'))
+
 
 @app.route('/passenger/search', methods=['GET'])
-@login_required(role='passenger')
+@login_required(role='Passenger') 
 def search_flights():
     source = request.args.get('source')
     dest = request.args.get('dest')
@@ -685,32 +830,39 @@ def search_flights():
     
     results = db_query(query, tuple(params), fetchall=True)
     
-    return render_template('dashboard_passenger.html', page='search', data={'results': results, 'search': request.args})
+    # Render within the passenger dashboard template structure
+    return render_template('dashboard_passenger.html', page='search', data={'results': results or [], 'search': request.args})
 
-@app.route('/api/flight/<flight_id>/seats', methods=['GET'])
-@login_required(role='passenger')
+
+@app.route('/api/flight/<int:flight_id>/seats', methods=['GET']) # Added type hint
+@login_required(role='Passenger') 
 def get_available_seats(flight_id):
     """API endpoint to get available seats for a flight."""
+    
+    # Validate flight_id (basic)
+    if not isinstance(flight_id, int) or flight_id <= 0:
+         return jsonify({'error': 'Invalid flight ID format'}), 400
+
     # Get aircraft capacity and booked seats
     query = """
         SELECT 
             a.capacity,
             a.aircraft_id,
-            GROUP_CONCAT(b.seat_no) as booked_seats
+            GROUP_CONCAT(b.seat_no ORDER BY b.seat_no SEPARATOR ',') as booked_seats 
         FROM flight f
         JOIN aircraft a ON f.aircraft_id = a.aircraft_id
         LEFT JOIN booking b ON f.flight_id = b.flight_id AND b.status = 'Confirmed'
         WHERE f.flight_id = %s
-        GROUP BY a.aircraft_id
+        GROUP BY a.aircraft_id, a.capacity 
     """
     result = db_query(query, (flight_id,), fetchone=True)
     
-    if result:
+    if result and result['aircraft_id']:
         # Get all seats for this aircraft from aircraft_seats table
         seats_query = "SELECT seat_no FROM aircraft_seats WHERE aircraft_id = %s ORDER BY seat_no"
         all_seats = db_query(seats_query, (result['aircraft_id'],), fetchall=True) or []
         
-        booked_seats_list = result['booked_seats'].split(',') if result['booked_seats'] else []
+        booked_seats_list = set(result['booked_seats'].split(',')) if result['booked_seats'] else set()
         
         # Build seat map
         seat_map = []
@@ -723,53 +875,91 @@ def get_available_seats(flight_id):
             })
         
         return jsonify({'seats': seat_map, 'capacity': result['capacity']})
-    
-    return jsonify({'error': 'Flight not found'}), 404
+    elif result is None and g.get('db_error'): # Check if db_query failed internally
+         print(f"ERROR fetching seats for flight {flight_id}: DB query failed.") # Debug Error
+         return jsonify({'error': 'Database error fetching seat data'}), 500
+    else: # Flight found but maybe no aircraft_id or no result?
+        print(f"WARNING: No seat data found for flight {flight_id}. Result: {result}") # Debug Warning
+        return jsonify({'error': 'Flight or Aircraft seat data not found'}), 404
+
+
 
 @app.route('/passenger/book', methods=['POST'])
-@login_required(role='passenger')
+@login_required(role='Passenger') 
+@requires_permission('book_flight') 
 def book_flight():
-    flight_id = request.form['flight_id']
-    seat_no = request.form['seat_no']
-    passenger_id = session['user_id']
-    
-    # Call the stored procedure
-    # Note: db_query handles commit and error flashing
-    result = db_query("CALL book_flight(%s, %s, %s, %s)",
-                      (passenger_id, flight_id, seat_no, 'Passenger'),
-                      commit=True, fetchone=True)
-    
-    if result:
-        flash(f"Booking successful! Your Booking ID is {result['new_booking_id']}.", "success")
-        return redirect(url_for('dashboard_passenger', page='bookings'))
-    else:
-        # Error flash is handled by db_query
-        return redirect(url_for('search_flights', **request.args))
+    flight_id = request.form.get('flight_id')
+    seat_no = request.form.get('seat_no')
+    passenger_id = session.get('user_id')
+
+    if not flight_id or not seat_no or not passenger_id:
+        flash("Missing information for booking.", "danger")
+        return redirect(url_for('dashboard_passenger', page='search'))
+
+    try:
+        # Call the stored procedure
+        result = db_query("CALL book_flight(%s, %s, %s, %s)",
+                        (passenger_id, flight_id, seat_no, 'Passenger'),
+                        commit=True, fetchone=True) # Fetch the output param
+        
+        if result and 'new_booking_id' in result:
+            flash(f"Booking successful! Your Booking ID is {result['new_booking_id']}.", "success")
+            return redirect(url_for('dashboard_passenger', page='bookings'))
+        else:
+            # Error flash should be handled by db_query if procedure SIGNALed
+            # Add a generic fallback if no specific message was flashed
+            if not get_flashed_messages():
+                 flash("Booking failed. The seat might be taken or the flight unavailable.", "danger") 
+            print(f"DEBUG: book_flight procedure call failed or returned unexpected result: {result}") # Debug
+            return redirect(url_for('dashboard_passenger', page='search')) # Redirect back to search
+
+    except Exception as e:
+         # Catch unexpected errors during the process
+         flash(f"An unexpected error occurred during booking: {e}", "danger")
+         print(f"--- ERROR during booking: {e} ---") # Debug Error
+         import traceback
+         traceback.print_exc()
+         return redirect(url_for('dashboard_passenger', page='search'))
 
 
 @app.route('/passenger/booking/cancel', methods=['POST'])
-@login_required(role='passenger')
+@login_required(role='Passenger') 
+@requires_permission('cancel_booking') 
 def cancel_booking():
-    booking_id = request.form['booking_id']
-    
-    # Check if this booking belongs to the logged-in passenger
-    booking = db_query("SELECT * FROM booking WHERE booking_id = %s AND passenger_id = %s",
-                       (booking_id, session['user_id']), fetchone=True)
-    
-    if booking:
-        if booking['status'] == 'Cancelled':
-            flash("This booking is already cancelled.", "info")
-        else:
-            # The trigger trg_audit_booking_update will handle the refund logic
-            db_query("UPDATE booking SET status = 'Cancelled' WHERE booking_id = %s", (booking_id,), commit=True)
-            flash("Booking successfully cancelled. A refund will be processed.", "success")
-    else:
-        flash("Booking not found or you do not have permission to cancel it.", "danger")
+    booking_id = request.form.get('booking_id')
+    passenger_id = session.get('user_id')
+
+    if not booking_id:
+         flash("No booking ID provided.", "danger")
+         return redirect(url_for('dashboard_passenger', page='bookings'))
+
+    try:
+        # Check if this booking belongs to the logged-in passenger
+        booking = db_query("SELECT status FROM booking WHERE booking_id = %s AND passenger_id = %s",
+                        (booking_id, passenger_id), fetchone=True)
         
+        if booking:
+            if booking['status'] == 'Cancelled':
+                flash("This booking is already cancelled.", "info")
+            else:
+                # Update status
+                db_query("UPDATE booking SET status = 'Cancelled' WHERE booking_id = %s", (booking_id,), commit=True)
+                # Assume trigger handles refund logging/payment update
+                flash("Booking successfully cancelled.", "success")
+        else:
+            flash("Booking not found or you do not have permission to cancel it.", "danger")
+
+    except Exception as e:
+        flash(f"An error occurred while cancelling the booking: {e}", "danger")
+        print(f"--- ERROR cancelling booking {booking_id}: {e} ---") # Debug Error
+        import traceback
+        traceback.print_exc()
+
     return redirect(url_for('dashboard_passenger', page='bookings'))
 
+
 @app.route('/passenger/amenities/search', methods=['GET'])
-@login_required(role='passenger')
+@login_required(role='Passenger') 
 def search_amenities():
     terminal = request.args.get('terminal', '')
     
@@ -777,270 +967,439 @@ def search_amenities():
     params = []
     
     if terminal:
-        query += " AND terminal = %s"
-        params.append(terminal)
+        query += " AND terminal LIKE %s" 
+        params.append(f'%{terminal}%')
         
     query += " ORDER BY name"
     
     results = db_query(query, tuple(params), fetchall=True)
     
-    return render_template('dashboard_passenger.html', page='amenities', data={'results': results, 'search': request.args})
+    # Render within the passenger dashboard template structure
+    return render_template('dashboard_passenger.html', page='amenities', data={'results': results or [], 'search': request.args})
+
 
 # ============================================
-# Generic Employee Dashboard (NEW & EXPANDED)
+# Generic Employee Dashboard (Using rbac_seed_v2.py keys)
 # ============================================
 
 @app.route('/dashboard/generic')
-@login_required()
+@login_required() 
 def dashboard_generic():
     """
     A generic, permission-based dashboard for all non-admin, non-passenger roles.
-    The content displayed is determined *directly* by the permissions assigned to the user's role.
+    Uses permission keys from rbac_seed_v2.py.
     """
+    current_role = session.get('role')
+    print(f"DEBUG: Entering dashboard_generic for role: {current_role}") # Debug Entry
+
+    # Immediate logout if role invalid or admin/passenger somehow gets here
+    if not current_role or current_role.lower() in ['admin', 'passenger']:
+        flash("Invalid access attempt for generic dashboard.", "danger")
+        print(f"ERROR: Invalid role '{current_role}' tried accessing generic dashboard. Logging out.") # Debug Error
+        return redirect(url_for('logout')) 
+
     data = {}
     emp_id = session['user_id']
-    permissions = get_user_permissions() # e.g., ['view_profile', 'add_aircraft', 'view_payroll']
-    
-    # Get all pages the user is allowed to see. It's just their permissions list.
-    allowed_pages = permissions
+    permissions = get_user_permissions() # Fetches permissions based on session['role']
+    # print(f"DEBUG: Fetched permissions for {current_role}: {permissions}") # Debug Permissions
+
+    if not permissions:
+        flash("You have no permissions assigned. Please contact an administrator.", "warning")
+        print(f"WARNING: No permissions found for role '{current_role}'. Displaying minimal page.") # Debug Warning
+        data['page'] = None # Indicate no specific page content applies
+        return render_template('dashboard_generic.html', data=data)
+
 
     # Determine which page to show
     page = request.args.get('page')
+    print(f"DEBUG: Requested page = {page}") # Debug Requested Page
     
-    # If no page is requested, or user doesn't have permission for it, pick the first available page as default
-    if not page or page not in allowed_pages:
-        page = allowed_pages[0] if allowed_pages else 'view_profile' # Default to profile
-    
-    data['page'] = page # Pass current page to template for highlighting
+    # Default page logic: Use first permission if requested page is invalid or missing
+    if not page or page not in permissions:
+        original_page_request = page # Store for logging
+        page = permissions[0] # Default to the first permission in their list
+        print(f"DEBUG: Requested page '{original_page_request}' invalid or not permitted. Defaulting to '{page}'.") # Debug Defaulting
 
-    # =======================================
-    # 👤  1. My Profile Page (Default)
-    # =======================================
-    if page == 'view_profile':
-        data['profile'] = db_query("""
-            SELECT e.*, r.role_name 
-            FROM employee e
-            LEFT JOIN roles r ON e.role_id = r.role_id
-            WHERE e.emp_id = %s
-        """, (emp_id,), fetchone=True)
+    data['page'] = page # Pass actual page key being rendered to template
 
-    # =======================================
-    # ✈️  2. View Assigned Flights
-    # =======================================
-    elif page == 'view_assigned_flights':
-        data['assignments'] = db_query("""
-            SELECT f.flight_no, f.airline, r.source_name, r.dest_name, f.departure_time, f.gate, sa.role_on_flight
-            FROM staff_assignment sa
-            JOIN flight f ON sa.flight_id = f.flight_id
-            JOIN route r ON f.route_id = r.route_id
-            WHERE sa.emp_id = %s AND f.status = 'Scheduled'
-            ORDER BY f.departure_time
-        """, (emp_id,), fetchall=True)
-    
-    # =======================================
-    # 🛠️  3. Maintenance (Permission: add_maintenance)
-    # =======================================
-    elif page == 'add_maintenance': 
-        data['aircrafts'] = db_query("SELECT aircraft_id, registration_no, model, status FROM aircraft", fetchall=True)
-        data['logs'] = db_query("""
-            SELECT m.*, a.registration_no
-            FROM maintenance m
-            JOIN aircraft a ON m.aircraft_id = a.aircraft_id
-            WHERE m.emp_id = %s
-            ORDER BY m.maintenance_date DESC
-        """, (emp_id,), fetchall=True)
+    print(f"DEBUG: Rendering page '{page}' for role '{current_role}'") # Debug Rendering Page
 
-    # =======================================
-    # 💰  4. View Payroll (Permission: view_payroll)
-    # =======================================
-    elif page == 'view_payroll':
-        data['paychecks'] = db_query("""
-            SELECT * FROM payroll
-            WHERE emp_id = %s
-            ORDER BY pay_date DESC
-        """, (emp_id,), fetchall=True)
+    # --- Data Fetching Logic based on permission key ---
+    # Standardize on keys from rbac_seed_v2.py
 
-    # =======================================
-    # 🛫  5. Manage Aircraft (Permission: add_aircraft)
-    # =======================================
-    elif page == 'add_aircraft': 
-        data['aircraft'] = db_query("SELECT * FROM aircraft ORDER BY registration_no", fetchall=True)
+    try: # Wrap data fetching in try block
+        if page == 'view_profile': # Default for all employees
+            data['profile'] = db_query("""
+                SELECT e.*, r.role_name 
+                FROM employee e
+                LEFT JOIN roles r ON e.role_id = r.role_id
+                WHERE e.emp_id = %s
+            """, (emp_id,), fetchone=True)
 
-    # =======================================
-    # 🗺️  6. Manage Routes (Permission: add_route)
-    # =======================================
-    elif page == 'add_route':
-        data['routes'] = db_query("SELECT * FROM route ORDER BY source_code, dest_code", fetchall=True)
+        elif page == 'view_assigned_flights': # Useful common task
+            data['assignments'] = db_query("""
+                SELECT f.flight_no, f.airline, r.source_name, r.dest_name, f.departure_time, f.gate, sa.role_on_flight
+                FROM staff_assignment sa
+                JOIN flight f ON sa.flight_id = f.flight_id
+                JOIN route r ON f.route_id = r.route_id
+                WHERE sa.emp_id = %s AND f.status = 'Scheduled'
+                ORDER BY f.departure_time
+            """, (emp_id,), fetchall=True)
+        
+        elif page == 'add_maintenance': # Key from rbac_seed
+            data['aircrafts'] = db_query("SELECT aircraft_id, registration_no, model, status FROM aircraft", fetchall=True)
+            data['logs'] = db_query("""
+                SELECT m.*, a.registration_no
+                FROM maintenance m
+                JOIN aircraft a ON m.aircraft_id = a.aircraft_id
+                WHERE m.emp_id = %s
+                ORDER BY m.maintenance_date DESC
+            """, (emp_id,), fetchall=True)
 
-    # =======================================
-    # 📊  7. View Reports (Permission: view_reports)
-    # =======================================
-    elif page == 'view_reports':
-        # This is the same data logic from the admin 'reports' page
-        data['passenger_summary'] = db_query("SELECT * FROM passenger_summary ORDER BY total_spent DESC", fetchall=True)
-    
-    # =======================================
-    #  NEW CONTENT BLOCKS FROM SQL SCRIPTS
-    # =======================================
+        elif page == 'view_payroll': # Common task, assume needed if granted
+            data['paychecks'] = db_query("""
+                SELECT * FROM payroll
+                WHERE emp_id = %s
+                ORDER BY pay_date DESC
+            """, (emp_id,), fetchall=True)
 
-    # ---------------------------------------
-    # 🧑‍✈️ 8. Manage Flights (create_flights / manage_flights)
-    # ---------------------------------------
-    elif page == 'create_flights' or page == 'manage_flights':
-        # This block serves both 'create_flights' and 'manage_flights'
-        data['flights'] = db_query("SELECT * FROM upcoming_flights ORDER BY departure_time", fetchall=True)
-        data['routes'] = db_query("SELECT * FROM route", fetchall=True)
-        data['aircraft'] = db_query("SELECT * FROM aircraft WHERE status = 'Operational'", fetchall=True)
-    
-    # ---------------------------------------
-    # 🚦 9. Update Flight Status (update_flights) -- CORRECTED KEY
-    # ---------------------------------------
-    elif page == 'update_flights':
-        # Show scheduled flights that can be updated
-        data['flights'] = db_query("SELECT * FROM flight WHERE status = 'Scheduled' ORDER BY departure_time", fetchall=True)
+        elif page == 'add_aircraft': # Key from rbac_seed
+            data['aircraft'] = db_query("SELECT * FROM aircraft ORDER BY registration_no", fetchall=True)
 
-    # ---------------------------------------
-    # 💰 10. Manage Payroll (manage_payroll)
-    # ---------------------------------------
-    elif page == 'manage_payroll':
-        # Same as admin view
-        data['payrolls'] = db_query("""
-            SELECT pr.*, e.name, e.role
-            FROM payroll pr
-            JOIN employee e ON pr.emp_id = e.emp_id
-            ORDER BY pr.pay_date DESC
-        """, fetchall=True)
-        data['employees'] = db_query("SELECT emp_id, name, salary FROM employee", fetchall=True)
+        elif page == 'add_route': # Key from rbac_seed
+            data['routes'] = db_query("SELECT * FROM route ORDER BY source_code, dest_code", fetchall=True)
 
-    # ---------------------------------------
-    # 👥 11. Manage Employees (manage_employees)
-    # ---------------------------------------
-    elif page == 'manage_employees':
-        # Same as admin view
-        data['employees'] = db_query("""
-            SELECT e.*, r.role_name, r.role_id 
-            FROM employee e
-            LEFT JOIN roles r ON e.role_id = r.role_id
-            ORDER BY e.name
-        """, fetchall=True)
-        data['roles'] = db_query("SELECT * FROM roles ORDER BY role_name", fetchall=True)
+        elif page == 'view_reports': # Often admin/manager, but allow if granted
+            data['passenger_summary'] = db_query("SELECT * FROM passenger_summary ORDER BY total_spent DESC", fetchall=True)
+        
+        elif page == 'manage_flights': # Key from rbac_seed
+            data['flights'] = db_query("SELECT * FROM upcoming_flights ORDER BY departure_time", fetchall=True)
+            data['routes'] = db_query("SELECT * FROM route", fetchall=True)
+            data['aircraft'] = db_query("SELECT * FROM aircraft WHERE status = 'Operational'", fetchall=True)
+        
+        elif page == 'update_flight_status': # Key from rbac_seed
+            data['flights'] = db_query("SELECT f.*, r.source_code, r.dest_code FROM flight f JOIN route r ON f.route_id=r.route_id WHERE f.status = 'Scheduled' ORDER BY f.departure_time", fetchall=True) # Added route info
 
-    # ---------------------------------------
-    # 🛡️ 12. Manage Roles (manage_roles / manage_permissions)
-    # ---------------------------------------
-    elif page == 'manage_roles' or page == 'manage_permissions':
-        # Redirect to the main admin roles page
-        return redirect(url_for('admin_roles'))
+        elif page == 'manage_payroll': # Key from rbac_seed
+            data['payrolls'] = db_query("""
+                SELECT pr.*, e.name, e.role
+                FROM payroll pr
+                JOIN employee e ON pr.emp_id = e.emp_id
+                ORDER BY pr.pay_date DESC
+            """, fetchall=True)
+            data['employees'] = db_query("SELECT emp_id, name, salary FROM employee", fetchall=True)
 
-    # ---------------------------------------
-    # ⚙️ 13. Update Aircraft Status (update_aircraft_status)
-    # ---------------------------------------
-    elif page == 'update_aircraft_status':
-        # Show all aircraft to update their status
-        data['aircraft'] = db_query("SELECT * FROM aircraft ORDER BY registration_no", fetchall=True)
+        elif page == 'manage_employees': # Key from rbac_seed
+            data['employees'] = db_query("""
+                SELECT e.*, r.role_name, r.role_id 
+                FROM employee e
+                LEFT JOIN roles r ON e.role_id = r.role_id
+                ORDER BY e.name
+            """, fetchall=True)
+            data['roles'] = db_query("SELECT * FROM roles ORDER BY role_name", fetchall=True)
 
-    # ---------------------------------------
-    # 📋 14. View Audit Log (view_audit)
-    # ---------------------------------------
-    elif page == 'view_audit':
-        # Same as admin view
-        data['logs'] = db_query("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 100", fetchall=True)
+        # manage_roles & manage_permissions redirect handled directly
+        elif page == 'manage_roles' or page == 'manage_permissions':
+             # Only Admin should have these. If a non-admin gets here, redirect them.
+             flash("Access Denied: Role and Permission management is Admin-only.", "danger")
+             print(f"WARNING: Role '{current_role}' attempted to access '{page}'. Redirecting.") # Debug Warning
+             return redirect(url_for('dashboard_generic'))
 
+
+        elif page == 'update_aircraft_status': # Key from rbac_seed
+            data['aircraft'] = db_query("SELECT * FROM aircraft ORDER BY registration_no", fetchall=True)
+
+        elif page == 'view_audit': # Key from rbac_seed
+            data['logs'] = db_query("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 100", fetchall=True)
+
+        # Passenger permissions should not be fetched here for employee roles
+        # Add elif blocks for any other valid employee permissions from rbac_seed_v2.py
+        # elif page == 'another_employee_permission':
+        #     data['some_data'] = db_query(...)
+
+        # else block removed - if page is in permissions but no elif matches,
+        # the template's final else block will handle the "Not Implemented" message.
+
+    except Exception as e:
+         # Catch unexpected errors during data fetching for the specific page
+         flash(f"An error occurred loading data for page '{page}': {e}", "danger")
+         print(f"--- ERROR loading data for page '{page}', role '{current_role}': {e} ---") # Debug Error
+         import traceback
+         traceback.print_exc()
+         # Render the template with the error message in the 'else' block
+         data['page'] = page # Still pass the page name so the correct 'else' block shows
+
+    # Ensure data dict always exists, even if fetching failed
+    data = data or {}
+    data['page'] = page # Ensure page key is always present
 
     return render_template('dashboard_generic.html', data=data)
 
+
 # ============================================
-# Employee Actions (Protected by Permissions)
-# =Example of new actions for new permissions
+# Employee Actions (Protected by Permissions, using rbac_seed_v2.py keys)
 # ============================================
 
 @app.route('/employee/flight/update_status', methods=['POST'])
 @login_required()
-@requires_permission('update_flights') # CORRECTED KEY
-def update_flight_status_action(): # Renamed function to avoid conflict
+@requires_permission('update_flight_status') # Key from rbac_seed
+def update_flight_status_action():
     form = request.form
-    db_query("UPDATE flight SET status = %s, gate = %s, delay_minutes = %s WHERE flight_id = %s",
-             (form['status'], form.get('gate'), form.get('delay_minutes', 0), form['flight_id']), commit=True)
-    flash("Flight status updated.", "success")
-    return redirect(url_for('dashboard_generic', page='update_flights')) # CORRECTED KEY
+    flight_id = form.get('flight_id')
+    new_status = form.get('status')
+    gate = form.get('gate') # Optional
+    delay = form.get('delay_minutes', 0) # Optional, default 0
+
+    if not flight_id or not new_status:
+        flash("Missing flight ID or new status.", "danger")
+        return redirect(url_for('dashboard_generic', page='update_flight_status'))
+
+    try:
+        db_query("UPDATE flight SET status = %s, gate = %s, delay_minutes = %s WHERE flight_id = %s",
+                (new_status, gate, delay, flight_id), commit=True)
+        flash("Flight status updated successfully.", "success")
+    except Exception as e:
+         flash(f"Error updating flight status: {e}", "danger")
+         print(f"--- ERROR updating flight {flight_id}: {e} ---") # Debug Error
+
+    return redirect(url_for('dashboard_generic', page='update_flight_status'))
+
 
 @app.route('/employee/aircraft/update_status', methods=['POST'])
 @login_required()
-@requires_permission('update_aircraft_status')
-def update_aircraft_status():
+@requires_permission('update_aircraft_status') # Key from rbac_seed
+def update_aircraft_status_action(): 
     form = request.form
-    db_query("UPDATE aircraft SET status = %s WHERE aircraft_id = %s",
-             (form['status'], form['aircraft_id']), commit=True)
-    flash("Aircraft status updated.", "success")
+    aircraft_id = form.get('aircraft_id')
+    new_status = form.get('status')
+
+    if not aircraft_id or not new_status:
+         flash("Missing aircraft ID or new status.", "danger")
+         return redirect(url_for('dashboard_generic', page='update_aircraft_status'))
+
+    try:
+        db_query("UPDATE aircraft SET status = %s WHERE aircraft_id = %s",
+                (new_status, aircraft_id), commit=True)
+        flash("Aircraft status updated successfully.", "success")
+    except Exception as e:
+        flash(f"Error updating aircraft status: {e}", "danger")
+        print(f"--- ERROR updating aircraft {aircraft_id}: {e} ---") # Debug Error
+
     return redirect(url_for('dashboard_generic', page='update_aircraft_status'))
 
-# (Admin actions like add_employee, add_payroll are already protected)
 
-# ============================================
-# Existing Employee Actions (FIXED REDIRECTS)
-# ============================================
+# --- Actions previously under /groundstaff or /employee, now generic ---
 
-@app.route('/employee/maintenance/add', methods=['POST'])
+@app.route('/generic/aircraft/add', methods=['POST'])
 @login_required()
-@requires_permission('add_maintenance')
-def add_maintenance_log():
-    form = request.form
-    emp_id = session['user_id']
-    
-    # Log the maintenance
-    m_id = db_query("INSERT INTO maintenance (aircraft_id, emp_id, notes, maintenance_date) VALUES (%s, %s, %s, %s)",
-             (form['aircraft_id'], emp_id, form['notes'], form['maintenance_date']), commit=True)
-    
-    # Update aircraft status and last maintenance date
-    db_query("UPDATE aircraft SET status = %s, last_maintenance = %s WHERE aircraft_id = %s",
-             (form['new_status'], form['maintenance_date'], form['aircraft_id']), commit=True)
-    
-    flash("Maintenance log added and aircraft status updated.", "success")
-    return redirect(url_for('dashboard_generic', page='add_maintenance'))
-
-@app.route('/groundstaff/aircraft/add', methods=['POST'])
-@login_required()
-@requires_permission('add_aircraft')
-def add_aircraft_route():
+@requires_permission('add_aircraft') # Key from rbac_seed
+def generic_add_aircraft():
     """Add new aircraft."""
     form = request.form
+    reg_no = form.get('registration_no')
+    model = form.get('model')
+    capacity = form.get('capacity')
+    status = form.get('status', 'Operational')
+
+    if not reg_no or not model or not capacity:
+         flash("Missing required aircraft details.", "danger")
+         return redirect(url_for('dashboard_generic', page='add_aircraft'))
+
     try:
         db_query("INSERT INTO aircraft (registration_no, model, capacity, status) VALUES (%s, %s, %s, %s)",
-                (form['registration_no'], form['model'], form['capacity'], form.get('status', 'Operational')), commit=True)
+                (reg_no, model, capacity, status), commit=True)
         flash("Aircraft added successfully!", "success")
     except mysql.connector.Error as err:
-        if err.errno == 1062:
-            flash("Aircraft with this registration number already exists.", "danger")
+        if err.errno == 1062: # Duplicate entry
+            flash(f"Aircraft with registration '{reg_no}' already exists.", "danger")
         else:
-            flash(f"Error: {err.msg}", "danger")
+            flash(f"Database error adding aircraft: {err.msg}", "danger")
+            print(f"❌ Error adding aircraft: {err}") # Log detailed error
     
-    # FIX: Redirect to generic dashboard
     return redirect(url_for('dashboard_generic', page='add_aircraft'))
 
-@app.route('/groundstaff/route/add', methods=['POST'])
+
+@app.route('/generic/route/add', methods=['POST'])
 @login_required()
-@requires_permission('add_route')
-def add_route_groundstaff():
+@requires_permission('add_route') # Key from rbac_seed
+def generic_add_route():
     """Add new route."""
     form = request.form
+    source_code = form.get('source_code')
+    source_name = form.get('source_name')
+    dest_code = form.get('dest_code')
+    dest_name = form.get('dest_name')
+
+    if not source_code or not source_name or not dest_code or not dest_name:
+         flash("Missing required route details.", "danger")
+         return redirect(url_for('dashboard_generic', page='add_route'))
+
     try:
-        distance = db_query("SELECT calc_distance(%s, %s) AS dist", 
-                           (form['source_code'], form['dest_code']), fetchone=True)
-        distance_km = distance['dist'] if distance else 0
+        # Assuming calc_distance exists and works
+        distance_result = db_query("SELECT calc_distance(%s, %s) AS dist",
+                           (source_code, dest_code), fetchone=True)
+        distance_km = distance_result['dist'] if distance_result else 0
         
         db_query("INSERT INTO route (source_code, source_name, dest_code, dest_name, distance_km) VALUES (%s, %s, %s, %s, %s)",
-                (form['source_code'], form['source_name'], form['dest_code'], form['dest_name'], distance_km), commit=True)
+                (source_code, source_name, dest_code, dest_name, distance_km), commit=True)
         flash("Route added successfully!", "success")
     except mysql.connector.Error as err:
-        if err.errno == 1062:
-            flash("This route already exists.", "danger")
+        if err.errno == 1062: # Duplicate entry
+            flash(f"Route from {source_code} to {dest_code} already exists.", "danger")
         else:
-            flash(f"Error: {err.msg}", "danger")
-    
-    # FIX: Redirect to generic dashboard
+            flash(f"Database error adding route: {err.msg}", "danger")
+            print(f"❌ Error adding route: {err}") # Log detailed error
+
     return redirect(url_for('dashboard_generic', page='add_route'))
 
 
+@app.route('/generic/maintenance/add', methods=['POST'])
+@login_required()
+@requires_permission('add_maintenance') # Key from rbac_seed
+def generic_add_maintenance_log():
+    form = request.form
+    emp_id = session['user_id']
+    aircraft_id = form.get('aircraft_id')
+    maint_date = form.get('maintenance_date')
+    notes = form.get('notes')
+    new_status = form.get('new_status')
+
+    if not aircraft_id or not maint_date or not new_status:
+         flash("Missing required maintenance details.", "danger")
+         return redirect(url_for('dashboard_generic', page='add_maintenance'))
+
+    try:
+        # Log the maintenance
+        m_id = db_query("INSERT INTO maintenance (aircraft_id, emp_id, notes, maintenance_date) VALUES (%s, %s, %s, %s)",
+                (aircraft_id, emp_id, notes, maint_date), commit=True)
+        
+        # Update aircraft status and last maintenance date
+        db_query("UPDATE aircraft SET status = %s, last_maintenance = %s WHERE aircraft_id = %s",
+                (new_status, maint_date, aircraft_id), commit=True)
+        flash("Maintenance log added and aircraft status updated.", "success")
+
+    except Exception as e:
+         flash(f"Error logging maintenance: {e}", "danger")
+         print(f"--- ERROR logging maintenance: {e} ---") # Log detailed error
+         import traceback
+         traceback.print_exc()
+
+    return redirect(url_for('dashboard_generic', page='add_maintenance'))
+
+
+# --- Reusing Admin logic for shared permissions ---
+# These functions now redirect correctly to the generic dashboard
+
+@app.route('/generic/employee/add', methods=['POST'])
+@login_required()
+@requires_permission('manage_employees')
+def generic_add_employee():
+    form = request.form
+    role_id = int(form.get('role_id', 0))
+    job_title = form.get('role_name', 'Employee') 
+    
+    try:
+        db_query("INSERT INTO employee (name, role, role_id, email, date_of_joining, salary) VALUES (%s, %s, %s, %s, %s, %s)",
+             (form['name'], job_title, role_id if role_id > 0 else None, form['email'], form['date_of_joining'], form['salary']), commit=True)
+        flash("Employee added successfully.", "success")
+    except Exception as e:
+        flash(f"Error adding employee: {e}", "danger")
+        print(f"--- ERROR adding employee (generic): {e} ---")
+    return redirect(url_for('dashboard_generic', page='manage_employees'))
+
+@app.route('/generic/employee/edit', methods=['POST'])
+@login_required()
+@requires_permission('manage_employees')
+def generic_edit_employee():
+    form = request.form
+    role_id = int(form.get('role_id', 0))
+    job_title = form.get('role_name', 'Employee') 
+    emp_id = form.get('emp_id')
+
+    if not emp_id:
+        flash("Employee ID missing.", "danger")
+        return redirect(url_for('dashboard_generic', page='manage_employees'))
+
+    try:
+        db_query("UPDATE employee SET name=%s, role=%s, role_id=%s, email=%s, date_of_joining=%s, salary=%s WHERE emp_id=%s",
+                (form['name'], job_title, role_id if role_id > 0 else None, form['email'], form['date_of_joining'], form['salary'], emp_id), commit=True)
+        flash("Employee updated successfully.", "success")
+    except Exception as e:
+        flash(f"Error editing employee: {e}", "danger")
+        print(f"--- ERROR editing employee {emp_id} (generic): {e} ---")
+    return redirect(url_for('dashboard_generic', page='manage_employees'))
+
+
+@app.route('/generic/payroll/add', methods=['POST'])
+@login_required()
+@requires_permission('manage_payroll')
+def generic_add_payroll():
+    form = request.form
+    emp_id = form.get('emp_id')
+    pay_date = form.get('pay_date')
+    bonus = form.get('bonus', 0.0)
+    deductions = form.get('deductions', 0.0)
+
+    if not emp_id or not pay_date:
+        flash("Missing employee ID or pay date.", "danger")
+        return redirect(url_for('dashboard_generic', page='manage_payroll'))
+        
+    try:
+        emp = db_query("SELECT salary FROM employee WHERE emp_id = %s", (emp_id,), fetchone=True)
+        if emp:
+            db_query("INSERT INTO payroll (emp_id, base_salary, bonus, deductions, pay_date) VALUES (%s, %s, %s, %s, %s)",
+                    (emp_id, emp['salary'], bonus, deductions, pay_date), commit=True)
+            flash("Payroll entry added.", "success")
+        else:
+            flash(f"Employee with ID {emp_id} not found.", "danger")
+    except Exception as e:
+        flash(f"Error adding payroll: {e}", "danger")
+        print(f"--- ERROR adding payroll for emp {emp_id} (generic): {e} ---")
+
+    return redirect(url_for('dashboard_generic', page='manage_payroll'))
+
+
+@app.route('/generic/flight/add', methods=['POST'])
+@login_required()
+@requires_permission('manage_flights') 
+def generic_add_flight():
+    form = request.form
+    required_fields = ['flight_no', 'airline', 'route_id', 'aircraft_id', 'departure_time', 'arrival_time', 'base_fare']
+    if not all(form.get(field) for field in required_fields):
+        flash("Missing required flight details.", "danger")
+        return redirect(url_for('dashboard_generic', page='manage_flights'))
+        
+    try:
+        db_query("INSERT INTO flight (flight_no, airline, route_id, aircraft_id, departure_time, arrival_time, base_fare) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (form['flight_no'], form['airline'], form['route_id'], form['aircraft_id'], form['departure_time'], form['arrival_time'], form['base_fare']), commit=True)
+        flash("Flight added successfully.", "success")
+    except Exception as e:
+        flash(f"Error adding flight: {e}", "danger")
+        print(f"--- ERROR adding flight {form.get('flight_no')} (generic): {e} ---")
+
+    return redirect(url_for('dashboard_generic', page='manage_flights'))
+
+@app.route('/generic/flight/cancel', methods=['POST'])
+@login_required()
+@requires_permission('manage_flights')
+def generic_cancel_flight():
+    flight_id = request.form.get('flight_id')
+    if not flight_id:
+        flash("No flight ID specified for cancellation.", "danger")
+        return redirect(url_for('dashboard_generic', page='manage_flights'))
+        
+    try:
+        # Only cancel scheduled flights
+        db_query("UPDATE flight SET status='Cancelled' WHERE flight_id=%s AND status = 'Scheduled'", (flight_id,), commit=True) 
+        flash("Flight marked as Cancelled (if it was scheduled).", "success")
+    except Exception as e:
+        flash(f"Error cancelling flight: {e}", "danger")
+        print(f"--- ERROR cancelling flight {flight_id} (generic): {e} ---")
+
+    return redirect(url_for('dashboard_generic', page='manage_flights'))
+
+
 if __name__ == '__main__':
+    # Add host='0.0.0.0' for Docker/external access if needed
     app.run(debug=True, port=5000)
 
