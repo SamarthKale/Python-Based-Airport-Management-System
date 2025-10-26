@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Passenger Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="bg-light">
+
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="{{ url_for('dashboard_passenger') }}">
+                <i class="bi bi-airplane-engines-fill"></i> Passenger Portal
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link {% if page == 'search' %}active{% endif %}" href="{{ url_for('dashboard_passenger', page='search') }}">
+                            <i class="bi bi-search"></i> Book a Flight
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if page == 'bookings' %}active{% endif %}" href="{{ url_for('dashboard_passenger', page='bookings') }}">
+                            <i class="bi bi-journal-check"></i> My Bookings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if page == 'amenities' %}active{% endif %}" href="{{ url_for('dashboard_passenger', page='amenities') }}">
+                            <i class="bi bi-shop"></i> Airport Amenities
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if page == 'profile' %}active{% endif %}" href="{{ url_for('dashboard_passenger', page='profile') }}">
+                            <i class="bi bi-person-circle"></i> My Profile
+                        </a>
+                    </li>
+                </ul>
+                <span class="navbar-text me-3">
+                    Welcome, <strong>{{ session.name }}</strong>
+                </span>
+                <a href="{{ url_for('logout') }}" class="btn btn-outline-light">
+                    <i class="bi bi-box-arrow-right"></i> Logout
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container my-5">
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- ============================================= -->
+        <!-- == 1. SEARCH FLIGHTS                       == -->
+        <!-- ============================================= -->
+        {% if page == 'search' %}
+        <h1 class="h2 mb-4">Search & Book a Flight</h1>
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="card-body p-4">
+                <form action="{{ url_for('search_flights') }}" method="GET">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-4">
+                            <label for="source" class="form-label fw-bold">From</label>
+                            <input type="text" class="form-control" id="source" name="source" placeholder="City or Airport Code (e.g., BOM)" value="{{ data.get('search', {}).get('source', '') }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="dest" class="form-label fw-bold">To</label>
+                            <input type="text" class="form-control" id="dest" name="dest" placeholder="City or Airport Code (e.g., DEL)" value="{{ data.get('search', {}).get('dest', '') }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="date" class="form-label fw-bold">Date</label>
+                            <input type="date" class="form-control" id="date" name="date" value="{{ data.get('search', {}).get('date', '') }}">
+                        </div>
+                        <div class="col-md-1 d-grid">
+                            <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i></button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Search Results -->
+        {% if data.results is defined %}
+        <div class="card shadow-sm border-0 rounded-4 mt-4">
+            <div class="card-header bg-white border-0 pt-3">
+                <h4 class="mb-0">Available Flights</h4>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Flight</th>
+                                <th>Route</th>
+                                <th>Departure</th>
+                                <th>Arrival</th>
+                                <th>Fare</th>
+                                <th>Book</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for flight in data.results %}
+                            <tr>
+                                <td class="fw-bold">{{ flight.flight_no }}<br><small class="text-muted">{{ flight.airline }}</small></td>
+                                <td>{{ flight.source_name }} &rarr; {{ flight.dest_name }}</td>
+                                <td>{{ flight.departure_time.strftime('%Y-%m-%d %H:%M') if flight.departure_time else '—' }}</td>
+                                <td>{{ flight.arrival_time.strftime('%Y-%m-%d %H:%M') if flight.arrival_time else '—' }}</td>
+                                <td class="fw-bold text-success">${{ "%.2f"|format(flight.current_fare) }}</td>
+                                <td>
+                                    <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#bookModal-{{ flight.flight_id }}">
+                                        Book Now
+                                    </button>
+                                </td>
+                            </tr>
+
+                            <!-- Booking Modal -->
+                            <div class="modal fade" id="bookModal-{{ flight.flight_id }}" tabindex="-1" aria-hidden="true">
+                                <div class="modal-dialog">
+                                    <div class="modal-content">
+                                        <form action="{{ url_for('book_flight') }}" method="POST">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title">Book Flight {{ flight.flight_no }}</h5>
+                                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                            </div>
+                                            <div class="modal-body">
+                                                <p><strong>Route:</strong> {{ flight.source_name }} to {{ flight.dest_name }}</p>
+                                                <p><strong>Departure:</strong> {{ flight.departure_time.strftime('%Y-%m-%d %H:%M') if flight.departure_time else '—' }}</p>
+                                                <p><strong>Fare:</strong> <strong class="text-success">${{ "%.2f"|format(flight.current_fare) }}</strong></p>
+
+                                                <input type="hidden" name="flight_id" value="{{ flight.flight_id }}">
+
+                                                <div class="mb-3">
+                                                    <label for="seat_no-{{ flight.flight_id }}" class="form-label">Enter Seat Number (e.g., 12A)</label>
+                                                    <input type="text" class="form-control" id="seat_no-{{ flight.flight_id }}" name="seat_no" placeholder="12A" required>
+                                                </div>
+
+                                                <p class="text-muted small">By clicking 'Confirm Booking', you agree to pay the total fare.</p>
+                                            </div>
+                                            <div class="modal-footer">
+                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                                <button type="submit" class="btn btn-primary">Confirm Booking</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center">No flights found matching your criteria.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ============================================= -->
+        <!-- == 2. MY BOOKINGS                          == -->
+        <!-- ============================================= -->
+        {% elif page == 'bookings' %}
+        <h1 class="h2 mb-4">My Bookings</h1>
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Flight</th>
+                                <th>Route</th>
+                                <th>Departure</th>
+                                <th>Seat</th>
+                                <th>Amount Paid</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for b in data.get('bookings', []) %}
+                            <tr>
+                                <td>
+                                    {% if b.status == 'Confirmed' %}
+                                    <span class="badge bg-success fs-6">Confirmed</span>
+                                    {% elif b.status == 'Cancelled' %}
+                                    <span class="badge bg-danger fs-6">Cancelled</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary fs-6">{{ b.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="fw-bold">{{ b.flight_no }}</td>
+                                <td>{{ b.source_code }} &rarr; {{ b.dest_code }}</td>
+                                <td>{{ b.departure_time.strftime('%Y-%m-%d %H:%M') if b.departure_time else '—' }}</td>
+                                <td class="fw-bold">{{ b.seat_no or '—' }}</td>
+                                <td class="text-success">${{ "%.2f"|format(b.amount or 0.00) }}</td>
+                                <td>
+                                    {% if b.status == 'Confirmed' %}
+                                    <form action="{{ url_for('cancel_booking') }}" method="POST">
+                                        <input type="hidden" name="booking_id" value="{{ b.booking_id }}">
+                                        <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Cancel this booking?')">
+                                            Cancel
+                                        </button>
+                                    </form>
+                                    {% else %}-{% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="7" class="text-center">You have no bookings.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================= -->
+        <!-- == 3. AIRPORT AMENITIES                    == -->
+        <!-- ============================================= -->
+        {% elif page == 'amenities' %}
+        <h1 class="h2 mb-4">Find Airport Amenities</h1>
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="card-body p-4">
+                <form action="{{ url_for('search_amenities') }}" method="GET">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-6">
+                            <label for="terminal" class="form-label fw-bold">Terminal</label>
+                            <input type="text" class="form-control" id="terminal" name="terminal" placeholder="e.g., T1 or T2" value="{{ data.get('search', {}).get('terminal', '') }}">
+                        </div>
+                        <div class="col-md-6 d-grid">
+                            <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> Search Amenities</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        {% if data.results is defined %}
+        <div class="card shadow-sm border-0 rounded-4 mt-4">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Vendor Name</th>
+                                <th>Type</th>
+                                <th>Terminal</th>
+                                <th>Location</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for v in data.results %}
+                            <tr>
+                                <td class="fw-bold">{{ v.name }}</td>
+                                <td>{{ v.amenity_type }}</td>
+                                <td>{{ v.terminal }}</td>
+                                <td>{{ v.location_desc }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="4" class="text-center">No amenities found for this terminal.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ============================================= -->
+        <!-- == 4. MY PROFILE                           == -->
+        <!-- ============================================= -->
+        {% elif page == 'profile' %}
+        <h1 class="h2 mb-4">My Profile & Summary</h1>
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="card-body p-4">
+                <h3 class="mb-3">{{ data.get('profile', {}).get('name', 'Unknown Passenger') }}</h3>
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Email:</strong> {{ data.get('profile', {}).get('email', 'N/A') }}</p>
+                        <p><strong>Passport No:</strong> {{ data.get('profile', {}).get('passport_no', 'N/A') }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Total Bookings:</strong> <span class="badge bg-primary fs-6">{{ data.get('profile', {}).get('total_bookings', 0) }}</span></p>
+                        <p><strong>Total Spent:</strong> <span class="badge bg-success fs-6">${{ "%.2f"|format(data.get('profile', {}).get('total_spent', 0.00)) }}</span></p>
+                        <p><strong>Loyalty Points:</strong> <span class="badge bg-warning text-dark fs-6">{{ data.get('profile', {}).get('total_points', 0) }}</span></p>
+                    </div>
+                </div>
+                <hr>
+                <p class="text-muted">This data is generated from the <code>passenger_summary</code> SQL View.</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

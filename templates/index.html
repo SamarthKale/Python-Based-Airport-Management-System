@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome - Airline Management System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body {
+            background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url('https://placehold.co/1920x1080/0052D4/FFFFFF?text=Airline+Fleet&font=inter');
+            background-size: cover;
+            background-position: center;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        .hero-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 2.5rem;
+        }
+    </style>
+</head>
+<body class="text-center">
+    
+    <main class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="rounded-4 shadow-lg hero-card">
+                    <h1 class="display-4 fw-bold mb-4"><i class="bi bi-airplane-engines-fill"></i> Airline Management System</h1>
+                    <p class="lead mb-5">Your integrated solution for airline operations. Please select your login portal to continue.</p>
+                    
+                    <div class="d-grid gap-3 d-sm-flex justify-content-center">
+                        <a href="{{ url_for('login_passenger') }}" class="btn btn-primary btn-lg px-4 gap-3">
+                            <i class="bi bi-person-circle"></i> Passenger Portal
+                        </a>
+                        <a href="{{ url_for('login_employee') }}" class="btn btn-outline-light btn-lg px-4">
+                            <i class="bi bi-briefcase-fill"></i> Employee Portal
+                        </a>
+                        <a href="{{ url_for('login_admin') }}" class="btn btn-outline-warning btn-lg px-4">
+                            <i class="bi bi-shield-lock-fill"></i> Admin Portal
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+</body>
+</html>

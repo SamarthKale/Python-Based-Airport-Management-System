@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Passenger Login</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login-bg">
+    
+    <div class="container">
+        <div class="row justify-content-center align-items-center vh-100">
+            <div class="col-md-5 col-lg-4">
+                <div class="card shadow-lg border-0 rounded-4">
+                    <div class="card-body p-4 p-sm-5">
+                        <h2 class="card-title text-center fw-bold mb-4"><i class="bi bi-person-circle text-primary"></i> Passenger Login</h2>
+                        
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                    {{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                </div>
+                                {% endfor %}
+                            {% endif %}
+                        {% endwith %}
+
+                        <form action="{{ url_for('login_passenger') }}" method="POST">
+                            <div class="form-floating mb-3">
+                                <input type="text" class="form-control" id="passport_no" name="passport_no" placeholder="P12345678" required>
+                                <label for="passport_no">Passport Number</label>
+                            </div>
+                            <div class="d-grid mb-3">
+                                <button class="btn btn-primary btn-lg" type="submit">Login</button>
+                            </div>
+                            <div class="text-center">
+                                <a href="{{ url_for('index') }}" class="text-decoration-none">&larr; Back to Home</a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
