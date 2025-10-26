@@ -145,25 +145,3 @@ Adding a New Role
 Go to /admin/roles
 Create a role → Assign permissions
 Update relevant employee’s role_id
-
-⚙️ Deployment (Production)
-
-Set environment variables
-
-export FLASK_SECRET_KEY="your-secret-key"
-export DB_PASSWORD="your-db-password"
-
-
-Run with Gunicorn
-
-pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:8000 app:app
-
-
-MySQL Optimization
-
-Enable pooling
-
-Backup daily
-
-S
