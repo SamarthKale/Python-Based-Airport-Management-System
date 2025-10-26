@@ -35,8 +35,13 @@
                             <div class="d-grid mb-3">
                                 <button class="btn btn-primary btn-lg" type="submit">Login</button>
                             </div>
+                            <div class="text-center mb-2">
+                                <a href="{{ url_for('register_passenger') }}" class="text-decoration-none text-primary">
+                                    <i class="bi bi-person-plus"></i> New? Register Here
+                                </a>
+                            </div>
                             <div class="text-center">
-                                <a href="{{ url_for('index') }}" class="text-decoration-none">&larr; Back to Home</a>
+                                <a href="{{ url_for('index') }}" class="text-decoration-none text-muted">&larr; Back to Home</a>
                             </div>
                         </form>
                     </div>

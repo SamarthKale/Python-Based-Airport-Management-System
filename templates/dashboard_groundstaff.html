@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ground Staff Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-success shadow-sm">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="{{ url_for('dashboard_groundstaff') }}">
+                <i class="bi bi-tools"></i> Ground Staff Portal
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link {% if page == 'aircraft' %}active{% endif %}" href="{{ url_for('dashboard_groundstaff', page='aircraft') }}">
+                            <i class="bi bi-airplane-fill"></i> Manage Aircraft
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if page == 'routes' %}active{% endif %}" href="{{ url_for('dashboard_groundstaff', page='routes') }}">
+                            <i class="bi bi-diagram-3-fill"></i> Manage Routes
+                        </a>
+                    </li>
+                </ul>
+                <span class="navbar-text me-3 text-white">
+                    Welcome, <strong>{{ session.name }}</strong>
+                </span>
+                <a href="{{ url_for('logout') }}" class="btn btn-outline-light">
+                    <i class="bi bi-box-arrow-right"></i> Logout
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container my-5">
+        
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Aircraft Management -->
+        {% if page == 'aircraft' %}
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h2">Aircraft Management</h1>
+            <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addAircraftModal">
+                <i class="bi bi-plus-circle-fill"></i> Add Aircraft
+            </button>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-success">
+                            <tr>
+                                <th>Registration No.</th>
+                                <th>Model</th>
+                                <th>Capacity</th>
+                                <th>Status</th>
+                                <th>Last Maintenance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ac in data.aircraft %}
+                            <tr>
+                                <td class="fw-bold">{{ ac.registration_no }}</td>
+                                <td>{{ ac.model }}</td>
+                                <td>{{ ac.capacity }} seats</td>
+                                <td>
+                                    {% if ac.status == 'Operational' %}
+                                    <span class="badge bg-success">Operational</span>
+                                    {% elif ac.status == 'Maintenance' %}
+                                    <span class="badge bg-warning text-dark">Under Maintenance</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">Grounded</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ ac.last_maintenance.strftime('%Y-%m-%d') if ac.last_maintenance else 'N/A' }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="5" class="text-center">No aircraft found.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Aircraft Modal -->
+        <div class="modal fade" id="addAircraftModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <form action="{{ url_for('add_aircraft_route') }}" method="POST">
+                        <div class="modal-header bg-success text-white">
+                            <h5 class="modal-title">Add New Aircraft</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label">Registration Number</label>
+                                <input type="text" class="form-control" name="registration_no" 
+                                       placeholder="e.g., VT-A320" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Model</label>
+                                <input type="text" class="form-control" name="model" 
+                                       placeholder="e.g., Airbus A320" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Capacity</label>
+                                <input type="number" class="form-control" name="capacity" 
+                                       placeholder="e.g., 160" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Status</label>
+                                <select class="form-select" name="status">
+                                    <option value="Operational">Operational</option>
+                                    <option value="Maintenance">Maintenance</option>
+                                    <option value="Grounded">Grounded</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-success">Add Aircraft</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Routes Management -->
+        {% elif page == 'routes' %}
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h2">Routes Management</h1>
+            <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addRouteModal">
+                <i class="bi bi-plus-circle-fill"></i> Add Route
+            </button>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-success">
+                            <tr>
+                                <th>Source</th>
+                                <th>Destination</th>
+                                <th>Distance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for route in data.routes %}
+                            <tr>
+                                <td><strong>{{ route.source_code }}</strong> - {{ route.source_name }}</td>
+                                <td><strong>{{ route.dest_code }}</strong> - {{ route.dest_name }}</td>
+                                <td>{{ route.distance_km }} km</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="3" class="text-center">No routes found.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Route Modal -->
+        <div class="modal fade" id="addRouteModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <form action="{{ url_for('add_route_groundstaff') }}" method="POST">
+                        <div class="modal-header bg-success text-white">
+                            <h5 class="modal-title">Add New Route</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Source Code</label>
+                                    <input type="text" class="form-control" name="source_code" 
+                                           placeholder="e.g., BOM" required maxlength="10">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Destination Code</label>
+                                    <input type="text" class="form-control" name="dest_code" 
+                                           placeholder="e.g., DEL" required maxlength="10">
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Source Name</label>
+                                    <input type="text" class="form-control" name="source_name" 
+                                           placeholder="e.g., Mumbai" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Destination Name</label>
+                                    <input type="text" class="form-control" name="dest_name" 
+                                           placeholder="e.g., New Delhi" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-success">Add Route</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

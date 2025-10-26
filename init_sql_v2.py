@@ -121,6 +121,31 @@ CREATE TABLE passenger (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- DEBUG FIX: Moved RBAC tables (roles, permissions, role_permissions)
+-- to be *before* the 'employee' table which references 'roles'.
+
+-- RBAC core tables: roles, permissions, role_permissions
+CREATE TABLE roles (
+  role_id INT AUTO_INCREMENT PRIMARY KEY,
+  role_name VARCHAR(50) UNIQUE NOT NULL,
+  description TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE permissions (
+  permission_id INT AUTO_INCREMENT PRIMARY KEY,
+  permission_key VARCHAR(100) UNIQUE NOT NULL,
+  description VARCHAR(255)
+);
+
+CREATE TABLE role_permissions (
+  role_id INT,
+  permission_id INT,
+  PRIMARY KEY (role_id, permission_id),
+  FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE,
+  FOREIGN KEY (permission_id) REFERENCES permissions(permission_id) ON DELETE CASCADE
+);
+
 CREATE TABLE employee (
   emp_id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
@@ -244,28 +269,6 @@ CREATE TABLE audit_log (
   description TEXT,
   changed_by VARCHAR(100),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- RBAC core tables: roles, permissions, role_permissions
-CREATE TABLE roles (
-  role_id INT AUTO_INCREMENT PRIMARY KEY,
-  role_name VARCHAR(50) UNIQUE NOT NULL,
-  description TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE permissions (
-  permission_id INT AUTO_INCREMENT PRIMARY KEY,
-  permission_key VARCHAR(100) UNIQUE NOT NULL,
-  description VARCHAR(255)
-);
-
-CREATE TABLE role_permissions (
-  role_id INT,
-  permission_id INT,
-  PRIMARY KEY (role_id, permission_id),
-  FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE,
-  FOREIGN KEY (permission_id) REFERENCES permissions(permission_id) ON DELETE CASCADE
 );
 
 -- Aircraft seats table for seat validation & map
@@ -737,7 +740,7 @@ VALUES
 ('BLR', 'Bengaluru', 'SIN', 'Singapore', 3600);
 
 INSERT INTO flight (flight_no, airline, route_id, aircraft_id, departure_time, arrival_time, base_fare, gate)
-VALUES ('AI-202','Air India', 1, 1, DATE_ADD(NOW(), INTERVAL -1 DAY), DATE_ADD(NOW(), INTERVAL -1 DAY + INTERVAL 2 HOUR), 6500.00, 'T1-A6');
+VALUES ('AI-202','Air India', 1, 1, DATE_ADD(NOW(), INTERVAL -1 DAY), DATE_ADD(DATE_ADD(NOW(), INTERVAL -1 DAY), INTERVAL 2 HOUR), 6500.00, 'T1-A6');
 
 INSERT INTO flight (flight_no, airline, route_id, aircraft_id, departure_time, arrival_time, base_fare, gate)
 VALUES ('6E-505','IndiGo', 2, 2, DATE_ADD(NOW(), INTERVAL 2 HOUR), DATE_ADD(NOW(), INTERVAL 4 HOUR), 3200.00, 'T2-B2');
@@ -808,3 +811,4 @@ print("="*60 + "\n")
 
 cursor.close()
 cnx.close()
+

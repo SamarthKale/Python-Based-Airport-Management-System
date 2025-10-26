@@ -132,35 +132,121 @@
 
                             <!-- Booking Modal -->
                             <div class="modal fade" id="bookModal-{{ flight.flight_id }}" tabindex="-1" aria-hidden="true">
-                                <div class="modal-dialog">
+                                <div class="modal-dialog modal-lg">
                                     <div class="modal-content">
                                         <form action="{{ url_for('book_flight') }}" method="POST">
-                                            <div class="modal-header">
-                                                <h5 class="modal-title">Book Flight {{ flight.flight_no }}</h5>
-                                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                            <div class="modal-header bg-primary text-white">
+                                                <h5 class="modal-title">Select Your Seat - Flight {{ flight.flight_no }}</h5>
+                                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                                             </div>
                                             <div class="modal-body">
-                                                <p><strong>Route:</strong> {{ flight.source_name }} to {{ flight.dest_name }}</p>
-                                                <p><strong>Departure:</strong> {{ flight.departure_time.strftime('%Y-%m-%d %H:%M') if flight.departure_time else '—' }}</p>
-                                                <p><strong>Fare:</strong> <strong class="text-success">${{ "%.2f"|format(flight.current_fare) }}</strong></p>
+                                                <div class="row mb-3">
+                                                    <div class="col-md-6">
+                                                        <p class="mb-1"><strong>Route:</strong> {{ flight.source_name }} → {{ flight.dest_name }}</p>
+                                                        <p class="mb-1"><strong>Departure:</strong> {{ flight.departure_time.strftime('%Y-%m-%d %H:%M') if flight.departure_time else '—' }}</p>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <p class="mb-1"><strong>Fare:</strong> <strong class="text-success">${{ "%.2f"|format(flight.current_fare) }}</strong></p>
+                                                        <p class="mb-0"><strong>Seats:</strong> {{ flight.seats_booked }}/{{ flight.capacity }}</p>
+                                                    </div>
+                                                </div>
 
                                                 <input type="hidden" name="flight_id" value="{{ flight.flight_id }}">
 
                                                 <div class="mb-3">
-                                                    <label for="seat_no-{{ flight.flight_id }}" class="form-label">Enter Seat Number (e.g., 12A)</label>
-                                                    <input type="text" class="form-control" id="seat_no-{{ flight.flight_id }}" name="seat_no" placeholder="12A" required>
+                                                    <label class="form-label"><strong>Select Your Seat</strong></label>
+                                                    <div id="seat-map-{{ flight.flight_id }}" class="border rounded p-3 bg-light" style="min-height: 300px;">
+                                                        <div class="text-center py-5">
+                                                            <div class="spinner-border text-primary" role="status">
+                                                                <span class="visually-hidden">Loading seats...</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <input type="hidden" id="selected-seat-{{ flight.flight_id }}" name="seat_no" required>
+                                                    <p class="text-muted small mt-2">
+                                                        <i class="bi bi-square-fill text-success"></i> Available 
+                                                        <i class="bi bi-square-fill text-danger ms-2"></i> Booked 
+                                                        <i class="bi bi-square-fill text-primary ms-2"></i> Your Selection
+                                                    </p>
                                                 </div>
 
-                                                <p class="text-muted small">By clicking 'Confirm Booking', you agree to pay the total fare.</p>
+                                                <div class="alert alert-info small">
+                                                    <i class="bi bi-info-circle"></i> Click on a green seat to select it for booking.
+                                                </div>
                                             </div>
                                             <div class="modal-footer">
                                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                                <button type="submit" class="btn btn-primary">Confirm Booking</button>
+                                                <button type="submit" class="btn btn-primary" id="confirm-btn-{{ flight.flight_id }}" disabled>
+                                                    Confirm Booking
+                                                </button>
                                             </div>
                                         </form>
                                     </div>
                                 </div>
                             </div>
+
+                            <script>
+                                // Load seat map when modal opens
+                                document.getElementById('bookModal-{{ flight.flight_id }}').addEventListener('shown.bs.modal', function() {
+                                    fetchSeatMap({{ flight.flight_id }});
+                                });
+
+                                function fetchSeatMap(flightId) {
+                                    fetch(`/api/flight/${flightId}/seats`)
+                                        .then(response => response.json())
+                                        .then(data => {
+                                            if (data.seats) {
+                                                renderSeatMap(flightId, data.seats);
+                                            }
+                                        })
+                                        .catch(error => {
+                                            console.error('Error fetching seats:', error);
+                                            document.getElementById(`seat-map-${flightId}`).innerHTML = 
+                                                '<div class="alert alert-danger">Error loading seat map. Please try again.</div>';
+                                        });
+                                }
+
+                                function renderSeatMap(flightId, seats) {
+                                    const seatMapDiv = document.getElementById(`seat-map-${flightId}`);
+                                    let html = '<div class="row g-2 justify-content-center">';
+                                    
+                                    seats.forEach(seat => {
+                                        const btnClass = seat.available ? 'btn-success' : 'btn-danger';
+                                        const disabled = !seat.available;
+                                        html += `
+                                            <div class="col-auto">
+                                                <button type="button" class="btn ${btnClass} btn-sm seat-btn" 
+                                                        data-seat="${seat.seat_no}" 
+                                                        ${disabled ? 'disabled' : ''}>
+                                                    ${seat.seat_no}
+                                                </button>
+                                            </div>
+                                        `;
+                                    });
+                                    
+                                    html += '</div>';
+                                    seatMapDiv.innerHTML = html;
+
+                                    // Add click handlers for available seats
+                                    document.querySelectorAll(`#seat-map-${flightId} .seat-btn`).forEach(btn => {
+                                        if (!btn.disabled) {
+                                            btn.addEventListener('click', function() {
+                                                // Remove previous selection
+                                                document.querySelectorAll(`#seat-map-${flightId} .seat-btn.btn-primary`).forEach(b => {
+                                                    b.classList.remove('btn-primary');
+                                                    b.classList.add('btn-success');
+                                                });
+                                                
+                                                // Select this seat
+                                                btn.classList.remove('btn-success');
+                                                btn.classList.add('btn-primary');
+                                                document.getElementById(`selected-seat-${flightId}`).value = btn.dataset.seat;
+                                                document.getElementById(`confirm-btn-${flightId}`).disabled = false;
+                                            });
+                                        }
+                                    });
+                                }
+                            </script>
                             {% else %}
                             <tr>
                                 <td colspan="6" class="text-center">No flights found matching your criteria.</td>

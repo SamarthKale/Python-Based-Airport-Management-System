@@ -111,6 +111,11 @@
                     <i class="bi bi-clipboard2-data-fill me-2"></i> Audit Log
                 </a>
             </li>
+            <li class="nav-item">
+                <a href="{{ url_for('admin_roles') }}" class="nav-link">
+                    <i class="bi bi-shield-lock-fill me-2"></i> Role & Permissions
+                </a>
+            </li>
         </ul>
 
         <div class="dropdown border-top pt-3 mt-3">
@@ -458,7 +463,14 @@
                             <tr>
                                 <td>{{ e.emp_id }}</td>
                                 <td class="fw-bold">{{ e.name }}</td>
-                                <td>{{ e.role }}</td>
+                                <td>
+                                    {% if e.role_name %}
+                                    <span class="badge bg-primary">{{ e.role_name }}</span>
+                                    <br><small class="text-muted">{{ e.role }}</small>
+                                    {% else %}
+                                    <span class="text-muted">{{ e.role or 'No role' }}</span>
+                                    {% endif %}
+                                </td>
                                 <td>{{ e.email }}</td>
                                 <td>{{ e.date_of_joining.strftime('%Y-%m-%d') }}</td>
                                 <td>${{ "%.2f"|format(e.salary) }}</td>
@@ -484,10 +496,21 @@
                                                     <label class="form-label">Name</label>
                                                     <input type="text" class="form-control" name="name" value="{{ e.name }}" required>
                                                 </div>
-                                                <div class="mb-3">
-                                                    <label class="form-label">Role</label>
-                                                    <input type="text" class="form-control" name="role" value="{{ e.role }}" required>
-                                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">System Role</label>
+                                    <select class="form-select" name="role_id" required>
+                                        <option value="">Select a role...</option>
+                                        {% for role in data.roles %}
+                                        <option value="{{ role.role_id }}" {% if e.role_id and role.role_id == e.role_id %}selected{% endif %}>
+                                            {{ role.role_name }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Job Title</label>
+                                    <input type="text" class="form-control" name="role_name" value="{{ e.role }}" required>
+                                </div>
                                                 <div class="mb-3">
                                                     <label class="form-label">Email</label>
                                                     <input type="email" class="form-control" name="email" value="{{ e.email }}" required>
@@ -533,8 +556,17 @@
                                 <input type="text" class="form-control" name="name" required>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Role</label>
-                                <input type="text" class="form-control" name="role" required>
+                                <label class="form-label">Select Role (System Role)</label>
+                                <select class="form-select" name="role_id" id="roleSelectAdd" required>
+                                    <option value="">Select a role...</option>
+                                    {% for role in data.roles %}
+                                    <option value="{{ role.role_id }}">{{ role.role_name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Job Title/Position</label>
+                                <input type="text" class="form-control" name="role_name" placeholder="e.g., Senior Engineer" required>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Email</label>

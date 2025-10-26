@@ -26,16 +26,33 @@
                             <i class="bi bi-airplane-fill"></i> Assigned Flights
                         </a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if page == 'maintenance' %}active{% endif %}" href="{{ url_for('dashboard_employee', page='maintenance') }}">
-                            <i class="bi bi-tools"></i> Maintenance
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if page == 'payroll' %}active{% endif %}" href="{{ url_for('dashboard_employee', page='payroll') }}">
-                            <i class="bi bi-cash-coin"></i> My Payroll
-                        </a>
-                    </li>
+                    {% if user_permissions %}
+                        {% if 'add_maintenance' in user_permissions or 'update_aircraft_status' in user_permissions %}
+                        <li class="nav-item">
+                            <a class="nav-link {% if page == 'maintenance' %}active{% endif %}" href="{{ url_for('dashboard_employee', page='maintenance') }}">
+                                <i class="bi bi-tools"></i> Maintenance
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if 'manage_payroll' in user_permissions or 'view_reports' in user_permissions %}
+                        <li class="nav-item">
+                            <a class="nav-link {% if page == 'payroll' %}active{% endif %}" href="{{ url_for('dashboard_employee', page='payroll') }}">
+                                <i class="bi bi-cash-coin"></i> My Payroll
+                            </a>
+                        </li>
+                        {% endif %}
+                    {% else %}
+                        <li class="nav-item">
+                            <a class="nav-link {% if page == 'maintenance' %}active{% endif %}" href="{{ url_for('dashboard_employee', page='maintenance') }}">
+                                <i class="bi bi-tools"></i> Maintenance
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if page == 'payroll' %}active{% endif %}" href="{{ url_for('dashboard_employee', page='payroll') }}">
+                                <i class="bi bi-cash-coin"></i> My Payroll
+                            </a>
+                        </li>
+                    {% endif %}
                 </ul>
                 <span class="navbar-text me-3">
                     Welcome, <strong>{{ session.name }}</strong>

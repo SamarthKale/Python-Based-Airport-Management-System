@@ -9,7 +9,7 @@ config = {
     'host': 'localhost',
     'user': 'root',
     'password': 'Swami@2006', # <-- IMPORTANT: CHANGE THIS
-    'database': 'airline_project_db',
+    'database': 'airline_pro_db_v2',
     'autocommit': True,
     'buffered': True # Added to prevent 'Unread result' errors in Flask
 }
