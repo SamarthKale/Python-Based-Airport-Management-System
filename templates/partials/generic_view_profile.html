@@ -1,0 +1,19 @@
+{# templates/partials/generic_view_profile.html #}
+<h1 class="h2 mb-4">My Profile</h1>
+<div class="card shadow-sm">
+  <div class="card-body">
+    {% if data.profile %}
+      <dl class="row">
+        <dt class="col-sm-3">Employee ID</dt><dd class="col-sm-9">{{ data.profile.emp_id }}</dd>
+        <dt class="col-sm-3">Name</dt><dd class="col-sm-9">{{ data.profile.name }}</dd>
+        <dt class="col-sm-3">System Role</dt><dd class="col-sm-9"><span class="badge bg-primary">{{ data.profile.role_name or 'N/A' }}</span></dd>
+        <dt class="col-sm-3">Job Title</dt><dd class="col-sm-9">{{ data.profile.role or 'N/A' }}</dd>
+        <dt class="col-sm-3">Email</dt><dd class="col-sm-9">{{ data.profile.email }}</dd>
+        <dt class="col-sm-3">Date of Joining</dt><dd class="col-sm-9">{{ data.profile.date_of_joining.strftime('%Y-%m-%d') if data.profile.date_of_joining else 'N/A' }}</dd>
+        <dt class="col-sm-3">Salary</dt><dd class="col-sm-9">${{ "%.2f"|format(data.profile.salary or 0.0) }}</dd>
+      </dl>
+    {% else %}
+      <p class="text-muted">Profile information not available.</p>
+    {% endif %}
+  </div>
+</div>

@@ -1,0 +1,50 @@
+{# templates/partials/generic_add_aircraft.html #}
+<h1 class="h2 mb-4">Manage Aircraft</h1>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addAircraftModal"><i class="bi bi-plus-circle-fill"></i> Add Aircraft</button>
+</div>
+<div class="card shadow-sm">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead class="table-dark"><tr><th>Reg No.</th><th>Model</th><th>Capacity</th><th>Status</th><th>Last Maintenance</th></tr></thead>
+        <tbody>
+          {% for ac in data.aircraft %}
+          <tr>
+            <td class="fw-bold">{{ ac.registration_no }}</td>
+            <td>{{ ac.model }}</td>
+            <td>{{ ac.capacity }}</td>
+            <td>{% if ac.status == 'Operational' %}<span class="badge bg-success">Operational</span>{% elif ac.status=='Maintenance' %}<span class="badge bg-warning text-dark">Maintenance</span>{% else %}<span class="badge bg-danger">{{ ac.status or 'Unknown' }}</span>{% endif %}</td>
+            <td>{{ ac.last_maintenance.strftime('%Y-%m-%d %H:%M') if ac.last_maintenance else 'N/A' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted">No aircraft found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Add Aircraft Modal -->
+<div class="modal fade" id="addAircraftModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form action="{{ url_for('generic_add_aircraft') }}" method="POST">
+        <div class="modal-header bg-primary text-white"><h5 class="modal-title">Add New Aircraft</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="mb-3"><label>Registration No *</label><input type="text" class="form-control" name="registration_no" required></div>
+          <div class="mb-3"><label>Model *</label><input type="text" class="form-control" name="model" required></div>
+          <div class="mb-3"><label>Capacity *</label><input type="number" class="form-control" name="capacity" required></div>
+          <div class="mb-3"><label>Status</label><select class="form-select" name="status"><option value="Operational">Operational</option><option value="Maintenance">Maintenance</option><option value="Grounded">Grounded</option></select></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="submit">Add Aircraft</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+
+
+
+

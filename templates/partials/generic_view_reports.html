@@ -1,0 +1,29 @@
+{# templates/partials/generic_view_reports.html #}
+<h1 class="h2 mb-4">Reports - Passenger Summary</h1>
+<div class="card shadow-sm">
+  <div class="card-body">
+    <p class="text-muted">Summary of passenger activity based on confirmed bookings and non-refunded payments.</p>
+    {% if data.passenger_summary %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead class="table-dark"><tr><th>Passenger</th><th>Passport No.</th><th>Total Bookings</th><th>Total Spent</th><th>Loyalty Points</th></tr></thead>
+        <tbody>
+          {% for s in data.passenger_summary %}
+          <tr>
+            <td class="fw-bold">{{ s.name }}<br><small class="text-muted">{{ s.email }}</small></td>
+            <td>{{ s.passport_no }}</td>
+            <td class="text-center">{{ s.total_bookings }}</td>
+            <td class="text-success fw-bold">${{ "%.2f"|format(s.total_spent or 0.0) }}</td>
+            <td class="text-center">{{ s.total_points }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted">No summary data available.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">No passenger summary data available yet.</div>
+    {% endif %}
+  </div>
+</div>

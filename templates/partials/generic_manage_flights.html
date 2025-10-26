@@ -1,0 +1,57 @@
+{# templates/partials/generic_manage_flights.html #}
+<h1 class="h2 mb-4">Manage Flights</h1>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  {% if 'manage_flights' in user_permissions %}
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addFlightModal"><i class="bi bi-plus-circle-fill"></i> Add Flight</button>
+  {% endif %}
+</div>
+<div class="card shadow-sm">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead class="table-dark"><tr><th>Flight No.</th><th>Route</th><th>Aircraft</th><th>Departure</th><th>Fare</th><th>Seats</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          {% for f in data.flights %}
+          <tr>
+            <td class="fw-bold">{{ f.flight_no }}<br><small class="text-muted">{{ f.airline }}</small></td>
+            <td>{{ f.source_code }} &rarr; {{ f.dest_code }}</td>
+            <td>{{ f.aircraft_model }}</td>
+            <td>{{ f.departure_time.strftime('%Y-%m-%d %H:%M') if f.departure_time else 'N/A' }}</td>
+            <td>${{ "%.2f"|format(f.current_fare or f.base_fare or 0.0) }}</td>
+            <td>{{ f.seats_booked }}/{{ f.capacity }}</td>
+            <td><span class="badge {% if f.status == 'Scheduled' %}bg-success{% elif f.status=='Departed' %}bg-info{% elif f.status=='Completed' %}bg-secondary{% else %}bg-danger{% endif %}">{{ f.status or 'Unknown' }}</span></td>
+            <td>
+              {% if f.status == 'Scheduled' and 'manage_flights' in user_permissions %}
+                <form action="{{ url_for('generic_cancel_flight') }}" method="POST" class="d-inline">
+                  <input type="hidden" name="flight_id" value="{{ f.flight_id }}">
+                  <button class="btn btn-danger btn-sm" onclick="return confirm('Cancel flight {{ f.flight_no }}?')">Cancel</button>
+                </form>
+              {% else %}-{% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="text-center text-muted">No flights found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Add Flight Modal -->
+<div class="modal fade" id="addFlightModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form action="{{ url_for('generic_add_flight') }}" method="POST">
+        <div class="modal-header bg-primary text-white"><h5 class="modal-title">Add New Flight</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="row"><div class="col-md-6 mb-3"><label>Flight No *</label><input type="text" class="form-control" name="flight_no" required></div><div class="col-md-6 mb-3"><label>Airline *</label><input type="text" class="form-control" name="airline" required></div></div>
+          <div class="row"><div class="col-md-6 mb-3"><label>Route *</label><select class="form-select" name="route_id" required><option value="">Select Route...</option>{% for r in data.routes %}<option value="{{ r.route_id }}">{{ r.source_name }} ({{ r.source_code }}) → {{ r.dest_name }} ({{ r.dest_code }})</option>{% endfor %}</select></div><div class="col-md-6 mb-3"><label>Aircraft *</label><select class="form-select" name="aircraft_id" required><option value="">Select Aircraft...</option>{% for ac in data.aircraft %}<option value="{{ ac.aircraft_id }}">{{ ac.model }} ({{ ac.registration_no }}) - {{ ac.capacity }} seats</option>{% endfor %}</select></div></div>
+        <div class="row"><div class="col-md-6 mb-3"><label>Departure Time *</label><input type="datetime-local" class="form-control" name="departure_time" required></div><div class="col-md-6 mb-3"><label>Arrival Time *</label><input type="datetime-local" class="form-control" name="arrival_time" required></div></div>
+        <div class="mb-3"><label>Base Fare *</label><input type="number" step="0.01" class="form-control" name="base_fare" required></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button class="btn btn-primary" type="submit">Save Flight</button></div>
+      </form>
+    </div>
+  </div>
+</div>

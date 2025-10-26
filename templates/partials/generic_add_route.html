@@ -1,0 +1,37 @@
+{# templates/partials/generic_add_route.html #}
+<h1 class="h2 mb-4">Manage Routes</h1>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addRouteModal"><i class="bi bi-plus-circle-fill"></i> Add Route</button>
+</div>
+<div class="card shadow-sm">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead class="table-dark"><tr><th>Source</th><th>Destination</th><th>Distance (km)</th></tr></thead>
+        <tbody>
+          {% for r in data.routes %}
+          <tr><td><strong>{{ r.source_code }}</strong> - {{ r.source_name }}</td><td><strong>{{ r.dest_code }}</strong> - {{ r.dest_name }}</td><td>{{ r.distance_km }}</td></tr>
+          {% else %}
+          <tr><td colspan="3" class="text-center text-muted">No routes found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Add Route Modal -->
+<div class="modal fade" id="addRouteModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form action="{{ url_for('generic_add_route') }}" method="POST">
+        <div class="modal-header bg-primary text-white"><h5 class="modal-title">Add New Route</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="row"><div class="col-md-6 mb-3"><label>Source Code *</label><input type="text" class="form-control" name="source_code" required maxlength="10"></div><div class="col-md-6 mb-3"><label>Destination Code *</label><input type="text" class="form-control" name="dest_code" required maxlength="10"></div></div>
+          <div class="row"><div class="col-md-6 mb-3"><label>Source Name *</label><input type="text" class="form-control" name="source_name" required></div><div class="col-md-6 mb-3"><label>Destination Name *</label><input type="text" class="form-control" name="dest_name" required></div></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="submit">Add Route</button></div>
+      </form>
+    </div>
+  </div>
+</div>

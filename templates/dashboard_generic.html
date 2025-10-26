@@ -6,6 +6,10 @@
     <title>Employee Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        .table-action-form { min-width: 250px; }
+        .modal form .row + .row { margin-top: 1rem; }
+    </style>
 </head>
 <body class="bg-light">
 
@@ -18,51 +22,42 @@
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
+
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                    
+
+                    <!-- Dynamic Navbar -->
                     {% set perm_display_map = {
-                        'add_routes': ('Add Routes', 'bi-diagram-3-fill'),
-                        'create_flights': ('Create Flights', 'bi-airplane-fill'),
-                        'manage_flights': ('Manage Flights', 'bi-airplane'),
-                        'update_flight_status': ('Update Flight Status', 'bi-clock-history'),
                         'view_profile': ('My Profile', 'bi-person-circle'),
+                        'view_assigned_flights': ('Assigned Flights', 'bi-calendar-check'),
+                        'add_aircraft': ('Manage Aircraft', 'bi-airplane-fill'),
+                        'add_route': ('Manage Routes', 'bi-signpost-split-fill'),
                         'add_maintenance': ('Log Maintenance', 'bi-tools'),
-                        'log_maintenance': ('Log Maintenance', 'bi-tools'),
-                        'view_payroll': ('My Payroll', 'bi-cash-coin'),
-                        'add_aircraft': ('Add Aircraft', 'bi-airplane-fill'),
+                        'update_aircraft_status': ('Update Aircraft Status', 'bi-wrench-adjustable-circle'),
+                        'manage_flights': ('Manage Flights', 'bi-airplane-engines-fill'),
+                        'update_flight_status': ('Update Flight Status', 'bi-clock-history'),
                         'manage_employees': ('Manage Employees', 'bi-people-fill'),
                         'manage_payroll': ('Manage Payroll', 'bi-cash-coin'),
-                        'update_flights': ('Update Flights', 'bi-clock-history'),
+                        'view_payroll': ('My Payroll', 'bi-wallet2'),
                         'view_reports': ('View Reports', 'bi-bar-chart-line-fill'),
-                        'update_aircraft_status': ('Aircraft Status', 'bi-wrench'),
-                        'view_audit': ('Audit Log', 'bi-clipboard2-data-fill')
+                        'view_audit': ('View Audit Log', 'bi-clipboard2-data-fill'),
+                        'manage_roles': ('Manage Roles', 'bi-shield-lock'),
+                        'manage_permissions': ('Manage Permissions', 'bi-key')
                     } %}
 
-                    {% for perm in user_permissions %}
-                        {% set display = perm_display_map.get(perm) %}
-                        {% if display %}
-                            {% set text = display[0] %}
-                            {% set icon = display[1] %}
-                        {% else %}
-                            {% set text = perm.replace('_', ' ').title() %}
-                            {% set icon = 'bi-gear-fill' %}
-                        {% endif %}
-                        
+                    {% for perm_key in user_permissions %}
+                        {% set info = perm_display_map.get(perm_key, (perm_key.replace('_', ' ').title(), 'bi-gear-fill')) %}
                         <li class="nav-item">
-                            <a class="nav-link {% if data.page == perm %}active{% endif %}" 
-                               href="{{ url_for('dashboard_generic', page=perm) }}">
-                                <i class="bi {{ icon }} me-1"></i> {{ text }}
+                            <a class="nav-link {% if data.page == perm_key %}active{% endif %}" href="{{ url_for('dashboard_generic', page=perm_key) }}">
+                                <i class="bi {{ info[1] }} me-1"></i> {{ info[0] }}
                             </a>
                         </li>
                     {% endfor %}
-
                 </ul>
-                <span class="navbar-text me-3">
+
+                <span class="navbar-text me-3 text-white">
                     Welcome, <strong>{{ session.name }}</strong>
-                    {% if session.emp_role_name %}
-                        ({{ session.emp_role_name }})
-                    {% endif %}
+                    {% if session.emp_role_name %} ({{ session.emp_role_name }}) {% elif session.role %} ({{ session.role }}) {% endif %}
                 </span>
                 <a href="{{ url_for('logout') }}" class="btn btn-outline-light">
                     <i class="bi bi-box-arrow-right"></i> Logout
@@ -71,339 +66,29 @@
         </div>
     </nav>
 
-    <!-- Main Content -->
+    <!-- Main Container -->
     <div class="container my-5">
 
+        <!-- Flash Messages -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
                 <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
                     {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
 
-        <!-- ============================================= -->
-        <!-- == ADD ROUTES                              == -->
-        <!-- ============================================= -->
-        {% if data.page == 'add_routes' %}
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h1 class="h2">Routes Management</h1>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addRouteModal">
-                <i class="bi bi-plus-circle-fill"></i> Add New Route
-            </button>
-        </div>
-
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle">
-                        <thead class="table-dark">
-                            <tr>
-                                <th>Source</th>
-                                <th>Destination</th>
-                                <th>Distance</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for route in data.routes %}
-                            <tr>
-                                <td><strong>{{ route.source_code }}</strong> - {{ route.source_name }}</td>
-                                <td><strong>{{ route.dest_code }}</strong> - {{ route.dest_name }}</td>
-                                <td>{{ "%.0f"|format(route.distance_km) }} km</td>
-                            </tr>
-                            {% else %}
-                            <tr><td colspan="3" class="text-center">No routes found.</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Add Route Modal -->
-        <div class="modal fade" id="addRouteModal" tabindex="-1">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <form action="{{ url_for('generic_add_route') }}" method="POST">
-                        <div class="modal-header bg-primary text-white">
-                            <h5 class="modal-title">Add New Route</h5>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">Source Code</label>
-                                    <input type="text" class="form-control" name="source_code" 
-                                           placeholder="e.g., BOM" required maxlength="10">
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">Destination Code</label>
-                                    <input type="text" class="form-control" name="dest_code" 
-                                           placeholder="e.g., DEL" required maxlength="10">
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">Source Name</label>
-                                    <input type="text" class="form-control" name="source_name" 
-                                           placeholder="e.g., Mumbai" required>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">Destination Name</label>
-                                    <input type="text" class="form-control" name="dest_name" 
-                                           placeholder="e.g., New Delhi" required>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-primary">Add Route</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <!-- ============================================= -->
-        <!-- == CREATE FLIGHTS                          == -->
-        <!-- ============================================= -->
-        {% elif data.page == 'create_flights' %}
-        <h1 class="h2 mb-4">Create New Flight</h1>
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <form action="{{ url_for('generic_add_flight') }}" method="POST">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Flight Number *</label>
-                            <input type="text" class="form-control" name="flight_no" 
-                                   placeholder="e.g., AI-202" required>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Airline *</label>
-                            <input type="text" class="form-control" name="airline" 
-                                   placeholder="e.g., Air India" required>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Route *</label>
-                            <select class="form-select" name="route_id" required>
-                                <option value="">Select Route...</option>
-                                {% for route in data.routes %}
-                                <option value="{{ route.route_id }}">
-                                    {{ route.source_name }} ({{ route.source_code }}) → {{ route.dest_name }} ({{ route.dest_code }})
-                                </option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Aircraft *</label>
-                            <select class="form-select" name="aircraft_id" required>
-                                <option value="">Select Aircraft...</option>
-                                {% for ac in data.aircraft %}
-                                <option value="{{ ac.aircraft_id }}">
-                                    {{ ac.model }} ({{ ac.registration_no }}) - Capacity: {{ ac.capacity }}
-                                </option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Departure Time *</label>
-                            <input type="datetime-local" class="form-control" name="departure_time" required>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Arrival Time *</label>
-                            <input type="datetime-local" class="form-control" name="arrival_time" required>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Base Fare *</label>
-                            <input type="number" step="0.01" class="form-control" name="base_fare" 
-                                   placeholder="e.g., 5000.00" required>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Gate</label>
-                            <input type="text" class="form-control" name="gate" 
-                                   placeholder="e.g., T2-A5">
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-success btn-lg">
-                        <i class="bi bi-plus-circle-fill"></i> Create Flight
-                    </button>
-                </form>
-            </div>
-        </div>
-
-        <!-- ============================================= -->
-        <!-- == MANAGE FLIGHTS                          == -->
-        <!-- ============================================= -->
-        {% elif data.page == 'manage_flights' %}
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h1 class="h2">Manage Flights</h1>
-            <a href="{{ url_for('dashboard_generic', page='create_flights') }}" class="btn btn-primary">
-                <i class="bi bi-plus-circle-fill"></i> Create New Flight
-            </a>
-        </div>
-
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle">
-                        <thead class="table-dark">
-                            <tr>
-                                <th>Flight No.</th>
-                                <th>Route</th>
-                                <th>Aircraft</th>
-                                <th>Departure</th>
-                                <th>Fare</th>
-                                <th>Seats</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for flight in data.flights %}
-                            <tr>
-                                <td class="fw-bold">
-                                    {{ flight.flight_no }}<br>
-                                    <small class="text-muted">{{ flight.airline }}</small>
-                                </td>
-                                <td>{{ flight.source_code }} → {{ flight.dest_code }}</td>
-                                <td>{{ flight.aircraft_model }}</td>
-                                <td>{{ flight.departure_time.strftime('%Y-%m-%d %H:%M') }}</td>
-                                <td>${{ "%.2f"|format(flight.current_fare) }}</td>
-                                <td>{{ flight.seats_booked }}/{{ flight.capacity }}</td>
-                                <td>
-                                    {% if flight.status == 'Scheduled' %}
-                                        <span class="badge bg-success">{{ flight.status }}</span>
-                                    {% elif flight.status == 'Departed' %}
-                                        <span class="badge bg-info">{{ flight.status }}</span>
-                                    {% elif flight.status == 'Completed' %}
-                                        <span class="badge bg-secondary">{{ flight.status }}</span>
-                                    {% else %}
-                                        <span class="badge bg-danger">{{ flight.status }}</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if flight.status == 'Scheduled' %}
-                                    <form action="{{ url_for('generic_cancel_flight') }}" method="POST" class="d-inline">
-                                        <input type="hidden" name="flight_id" value="{{ flight.flight_id }}">
-                                        <button type="submit" class="btn btn-danger btn-sm" 
-                                                onclick="return confirm('Are you sure you want to cancel this flight?')">
-                                            Cancel
-                                        </button>
-                                    </form>
-                                    {% else %}
-                                        <span class="text-muted">—</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% else %}
-                            <tr>
-                                <td colspan="8" class="text-center">No flights found.</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- ============================================= -->
-        <!-- == UPDATE FLIGHT STATUS                    == -->
-        <!-- ============================================= -->
-        {% elif data.page == 'update_flight_status' %}
-        <h1 class="h2 mb-4">Update Flight Status</h1>
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle">
-                        <thead class="table-dark">
-                            <tr>
-                                <th>Flight No.</th>
-                                <th>Route</th>
-                                <th>Departure</th>
-                                <th>Current Status</th>
-                                <th>Gate</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for flight in data.flights %}
-                            <tr>
-                                <td class="fw-bold">
-                                    {{ flight.flight_no }}<br>
-                                    <small class="text-muted">{{ flight.airline }}</small>
-                                </td>
-                                <td>
-                                    {{ flight.source_name }} → {{ flight.dest_name }}
-                                </td>
-                                <td>{{ flight.departure_time.strftime('%Y-%m-%d %H:%M') }}</td>
-                                <td>
-                                    {% if flight.status == 'Scheduled' %}
-                                        <span class="badge bg-success">Scheduled</span>
-                                    {% elif flight.status == 'Departed' %}
-                                        <span class="badge bg-info">Departed</span>
-                                    {% else %}
-                                        <span class="badge bg-secondary">{{ flight.status }}</span>
-                                    {% endif %}
-                                </td>
-                                <td>{{ flight.gate or '—' }}</td>
-                                <td>
-                                    <form action="{{ url_for('update_flight_status_action') }}" method="POST" class="row g-2">
-                                        <input type="hidden" name="flight_id" value="{{ flight.flight_id }}">
-                                        <div class="col-auto">
-                                            <select name="status" class="form-select form-select-sm" required>
-                                                <option value="Scheduled" {% if flight.status == 'Scheduled' %}selected{% endif %}>Scheduled</option>
-                                                <option value="Departed" {% if flight.status == 'Departed' %}selected{% endif %}>Departed</option>
-                                                <option value="Completed" {% if flight.status == 'Completed' %}selected{% endif %}>Completed</option>
-                                                <option value="Cancelled" {% if flight.status == 'Cancelled' %}selected{% endif %}>Cancelled</option>
-                                            </select>
-                                        </div>
-                                        <div class="col-auto">
-                                            <input type="text" name="gate" class="form-control form-control-sm" 
-                                                   placeholder="Gate" value="{{ flight.gate or '' }}">
-                                        </div>
-                                        <div class="col-auto">
-                                            <input type="number" name="delay_minutes" class="form-control form-control-sm" 
-                                                   placeholder="Delay (min)" value="{{ flight.delay_minutes or 0 }}" min="0">
-                                        </div>
-                                        <div class="col-auto">
-                                            <button type="submit" class="btn btn-primary btn-sm">Update</button>
-                                        </div>
-                                    </form>
-                                </td>
-                            </tr>
-                            {% else %}
-                            <tr>
-                                <td colspan="6" class="text-center">No flights to update.</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- ============================================= -->
-        <!-- == FALLBACK / NO PERMISSION               == -->
-        <!-- ============================================= -->
+        <!-- Content Section -->
+        {% if data.page %}
+            {% include 'partials/generic_' + data.page + '.html' ignore missing %}
         {% else %}
-        <h1 class="h2 mb-4">Welcome, {{ session.name }}</h1>
-        <div class="alert alert-info">
-            <h4 class="alert-heading">
-                <i class="bi bi-info-circle-fill"></i> No Content Available
-            </h4>
-            <p>The page '{{ data.page }}' doesn't have a corresponding display yet, or you may not have the required permissions.</p>
-            <hr>
-            <p class="mb-0">Please select an option from the menu above or contact your administrator.</p>
-        </div>
+            <div class="alert alert-info text-center">
+                <h4>Welcome, {{ session.name }}</h4>
+                <p class="mb-0">Select a section from the menu above to get started.</p>
+            </div>
         {% endif %}
 
     </div>

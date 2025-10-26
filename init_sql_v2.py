@@ -762,27 +762,57 @@ INSERT INTO maintenance (aircraft_id, emp_id, notes, maintenance_date)
 VALUES
 (4, 3, 'Scheduled check', DATE_SUB(NOW(), INTERVAL 5 DAY));
 """
-exec_sql_block(sample_data_sql, "SAMPLE DATA INSERTS")
-
-# ----------------------------------------
-# 11. Ensure aircraft_seats populated for existing aircraft (in case trigger didn't run for imported aircraft)
-# ----------------------------------------
-populate_seats_sql = """
--- Populate seats for existing aircraft if none exist
-INSERT INTO aircraft_seats (aircraft_id, seat_no)
-SELECT a.aircraft_id, CONCAT( FLOOR((seq - 1) / 6) + 1, ELT(((seq - 1) % 6) + 1, 'A','B','C','D','E','F'))
-FROM aircraft a
-JOIN (
-  SELECT @row := @row + 1 AS seq FROM
-  (SELECT 0 UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) t1,
-  (SELECT 0 UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) t2,
-  (SELECT @row := 0) vars
-) seqs
-WHERE seqs.seq <= a.capacity
-AND NOT EXISTS (SELECT 1 FROM aircraft_seats s WHERE s.aircraft_id = a.aircraft_id AND s.seat_no = CONCAT( FLOOR((seq - 1) / 6) + 1, ELT(((seq - 1) % 6) + 1, 'A','B','C','D','E','F')));
-"""
-exec_sql_block(populate_seats_sql, "POPULATE AIRCRAFT SEATS")
-
+def exec_sql_block(sql_block, section_name="SQL Block"):
+    print(f"Executing {section_name}...")
+    try:
+        if 'DELIMITER //' in sql_block:
+            parts = sql_block.split('DELIMITER //')
+            # Execute statements before first DELIMITER //
+            before = parts[0].split(';')
+            for s in before:
+                if s.strip():
+                    cursor.execute(s)
+            # Handle procedure/trigger blocks
+            for part in parts[1:]:
+                if '\nDELIMITER ;' in part:
+                    proc_chunk, after_chunk = part.split('\nDELIMITER ;', 1)
+                    for proc in proc_chunk.split('//'):
+                        if proc.strip():
+                            cursor.execute(proc)
+                            # Consume any pending results
+                            try:
+                                while True:
+                                    cursor.fetchall()
+                                    if not cursor.next_result():
+                                        break
+                            except Exception:
+                                pass
+                    for s in after_chunk.split(';'):
+                        if s.strip():
+                            cursor.execute(s)
+                else:
+                    if part.strip():
+                        cursor.execute(part)
+        else:
+            # For standard SQL or procedure calls
+            statements = sql_block.split(';')
+            for statement in statements:
+                if statement.strip():
+                    cursor.execute(statement)
+                    # Handle CALL statements safely
+                    if statement.strip().upper().startswith('CALL'):
+                        try:
+                            # Consume ALL possible result sets
+                            while True:
+                                cursor.fetchall()
+                                if not cursor.next_result():
+                                    break
+                        except mysql.connector.errors.InterfaceError:
+                            pass
+        print(f"✅ Executed {section_name} successfully.")
+    except mysql.connector.Error as err:
+        print(f"❌ Error in {section_name}: {err}")
+        sys.exit(1)
 # ----------------------------------------
 # 12. ARCHIVAL EVENT (move completed flights to archived_flights)
 # ----------------------------------------

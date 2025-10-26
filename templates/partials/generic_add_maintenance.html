@@ -1,0 +1,16 @@
+{# templates/partials/generic_add_maintenance.html #}
+<h1 class="h2 mb-4">Log Aircraft Maintenance</h1>
+<div class="card shadow-sm border-0 rounded-4 mb-4">
+  <div class="card-header bg-primary text-white border-0 pt-3"><h4 class="mb-0"><i class="bi bi-tools"></i> Log New Maintenance</h4></div>
+  <div class="card-body">
+    <form action="{{ url_for('generic_add_maintenance_log') }}" method="POST">
+      <div class="row">
+        <div class="col-md-6 mb-3"><label class="form-label">Aircraft *</label><select class="form-select" name="aircraft_id" required><option value="">Select Aircraft...</option>{% for ac in data.aircrafts %}<option value="{{ ac.aircraft_id }}">{{ ac.registration_no }} ({{ ac.model }}) - Status: {{ ac.status }}</option>{% endfor %}</select></div>
+        <div class="col-md-3 mb-3"><label class="form-label">Maintenance Date *</label><input type="datetime-local" class="form-control" name="maintenance_date" required></div>
+        <div class="col-md-3 mb-3"><label class="form-label">New Aircraft Status *</label><select class="form-select" name="new_status" required><option value="Operational">Operational</option><option value="Maintenance">Maintenance</option><option value="Grounded">Grounded</option></select></div>
+      </div>
+      <div class="mb-3"><label class="form-label">Maintenance Notes</label><textarea class="form-control" name="notes" rows="3" placeholder="Enter details of work performed..."></textarea></div>
+      <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Submit Log</button>
+    </form>
+  </div>
+</div>

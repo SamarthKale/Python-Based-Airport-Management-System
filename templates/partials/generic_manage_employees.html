@@ -1,0 +1,75 @@
+
+
+{# templates/partials/generic_manage_employees.html #}
+<h1 class="h2 mb-4">Manage Employees</h1>
+<button class="btn btn-primary mb-3" data-bs-toggle="modal" data-bs-target="#addEmployeeModal">
+  <i class="bi bi-plus-circle-fill"></i> Add Employee
+</button>
+<div class="card shadow-sm">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead class="table-dark"><tr><th>ID</th><th>Name</th><th>Role</th><th>Email</th><th>Joining Date</th><th>Salary</th><th>Actions</th></tr></thead>
+        <tbody>
+          {% for e in data.employees %}
+            <tr>
+              <td>{{ e.emp_id }}</td>
+              <td class="fw-bold">{{ e.name }}</td>
+              <td><span class="badge bg-primary">{{ e.role_name or 'N/A' }}</span><br><small class="text-muted">{{ e.role }}</small></td>
+              <td>{{ e.email }}</td>
+              <td>{{ e.date_of_joining.strftime('%Y-%m-%d') if e.date_of_joining else 'N/A' }}</td>
+              <td>${{ "%.2f"|format(e.salary or 0.0) }}</td>
+              <td>
+                <button class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#editEmployeeModal-{{ e.emp_id }}">Edit</button>
+              </td>
+            </tr>
+
+            <!-- Edit Modal -->
+            <div class="modal fade" id="editEmployeeModal-{{ e.emp_id }}" tabindex="-1">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <form action="{{ url_for('generic_edit_employee') }}" method="POST">
+                    <div class="modal-header"><h5 class="modal-title">Edit {{ e.name }}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                    <div class="modal-body">
+                      <input type="hidden" name="emp_id" value="{{ e.emp_id }}">
+                      <div class="mb-3"><label>Name</label><input class="form-control" name="name" value="{{ e.name }}" required></div>
+                      <div class="mb-3"><label>System Role</label><select class="form-select" name="role_id" required><option value="">Select Role...</option>{% for r in data.roles %}<option value="{{ r.role_id }}" {% if e.role_id == r.role_id %}selected{% endif %}>{{ r.role_name }}</option>{% endfor %}</select></div>
+                      <div class="mb-3"><label>Job Title</label><input class="form-control" name="role_name" value="{{ e.role }}" required></div>
+                      <div class="mb-3"><label>Email</label><input type="email" class="form-control" name="email" value="{{ e.email }}" required></div>
+                      <div class="mb-3"><label>Joining Date</label><input type="date" class="form-control" name="date_of_joining" value="{{ e.date_of_joining.strftime('%Y-%m-%d') if e.date_of_joining else '' }}" required></div>
+                      <div class="mb-3"><label>Salary</label><input type="number" step="0.01" class="form-control" name="salary" value="{{ e.salary }}" required></div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button class="btn btn-primary" type="submit">Save Changes</button></div>
+                  </form>
+                </div>
+              </div>
+            </div>
+
+          {% else %}
+            <tr><td colspan="7" class="text-center text-muted">No employees found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Add Employee Modal -->
+<div class="modal fade" id="addEmployeeModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form action="{{ url_for('generic_add_employee') }}" method="POST">
+        <div class="modal-header bg-primary text-white"><h5 class="modal-title">Add New Employee</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="mb-3"><label>Name</label><input class="form-control" name="name" required></div>
+          <div class="mb-3"><label>System Role</label><select class="form-select" name="role_id" required><option value="">Select Role...</option>{% for r in data.roles %}<option value="{{ r.role_id }}">{{ r.role_name }}</option>{% endfor %}</select></div>
+          <div class="mb-3"><label>Job Title</label><input class="form-control" name="role_name" placeholder="e.g., Senior Pilot" required></div>
+          <div class="mb-3"><label>Email</label><input type="email" class="form-control" name="email" required></div>
+          <div class="mb-3"><label>Joining Date</label><input type="date" class="form-control" name="date_of_joining" required></div>
+          <div class="mb-3"><label>Salary</label><input type="number" step="0.01" class="form-control" name="salary" required></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="submit">Add Employee</button></div>
+      </form>
+    </div>
+  </div>
+</div>
