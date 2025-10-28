@@ -1,6 +1,9 @@
 import mysql.connector
 from mysql.connector import pooling, InterfaceError # Added InterfaceError
-from flask import Flask, render_template, request, redirect, url_for, session, flash, g, jsonify
+from flask import (
+    Flask, render_template, request, redirect, 
+    url_for, session, flash, g, jsonify, get_flashed_messages
+) # Added get_flashed_messages
 from functools import wraps
 from db_config import config # Import config from db_config.py
 import datetime
@@ -59,23 +62,40 @@ def db_query(query, params=None, commit=False, fetchone=False, fetchall=False):
         cursor = conn.cursor(dictionary=True, buffered=True)
         cursor.execute(query, params or ())
         
+        result_data = None
+        
+        # START FIX: Handle stored procedure results
         if query.strip().upper().startswith("CALL"):
             try:
-                # Consume results from procedures to prevent errors
-                for result in cursor.stored_results(): result.fetchall()
+                # Iterate over all result sets produced by the procedure
+                for i, result in enumerate(cursor.stored_results()):
+                    # If we want data (fetchone/fetchall) and this is the first set, grab it
+                    if (fetchone or fetchall) and i == 0:
+                        if fetchone:
+                            result_data = result.fetchone()
+                        elif fetchall:
+                            result_data = result.fetchall()
+                    else:
+                        # IMPORTANT: We must consume *all* rows from *all* other result sets
+                        result.fetchall()
             except InterfaceError as ie:
-                # Ignore "No result set" error, raise others
+                # "No result set" is a common and benign error from procedures
                 if "No result set" not in str(ie): raise
-
-        result_data = None
-        # Check if cursor.description exists (indicates a SELECT-like result)
-        if cursor.description:
+        
+        # ELSE: This is a simple query (non-CALL)
+        # Only check cursor.description if it's NOT a CALL
+        elif cursor.description:
             if fetchone: result_data = cursor.fetchone()
             elif fetchall: result_data = cursor.fetchall()
         
+        # Now, commit or handle results
         if commit:
             conn.commit()
             last_id = cursor.lastrowid
+        
+        # Prioritize returning data from the procedure if it was fetched
+        if result_data is not None:
+            return result_data
         
         # Prioritize returning last_id if it was a commit operation that generated one
         return last_id if commit and last_id is not None else result_data
@@ -590,17 +610,36 @@ def get_available_seats(flight_id):
 @login_required(role='Passenger')
 @requires_permission('book_flight') 
 def book_flight():
-    # ... (Keep existing implementation) ...
+    # START FIX: Handle NameError and redundant flashing
     fid=request.form.get('flight_id'); seat=request.form.get('seat_no'); pid=session.get('user_id')
     search= {k:v for k,v in request.args.items() if k in ['source','dest','date']}
-    if not all([fid,seat,pid]): flash("Missing info.", "danger"); return redirect(url_for('dashboard_passenger', page='search', **search))
+    
+    if not all([fid,seat,pid]): 
+        flash("Missing flight or seat info.", "danger")
+        return redirect(url_for('dashboard_passenger', page='search', **search))
+    
     try:
         res = db_query("CALL book_flight(%s, %s, %s, %s)", (pid, fid, seat, 'Passenger'), commit=True, fetchone=True) 
-        if res and 'new_booking_id' in res: flash(f"Booking OK! ID: {res['new_booking_id']}.", "success"); return redirect(url_for('dashboard_passenger', page='bookings'))
+        
+        if res and 'new_booking_id' in res: 
+            flash(f"Booking Successful! Your Booking ID is: {res['new_booking_id']}.", "success")
+            return redirect(url_for('dashboard_passenger', page='bookings'))
+        
+        # If 'res' is None, db_query already flashed the error (e.g., "Seat already booked")
+        elif res is None:
+            # db_query already handled flashing the SQL error
+            pass
         else:
-            if not get_flashed_messages(category_filter=["danger", "warning"]): flash("Booking failed.", "danger") 
-            return redirect(url_for('dashboard_passenger', page='search', **search)) 
-    except Exception as e: flash(f"Error: {e}", "danger"); print(f"--- CRITICAL booking error: {e} ---"); traceback.print_exc(); return redirect(url_for('dashboard_passenger', page='search', **search))
+            # This case is unlikely, but good to have
+            flash("Booking failed. (Unexpected procedure result)", "danger")
+        
+        return redirect(url_for('dashboard_passenger', page='search', **search)) 
+    
+    except Exception as e: 
+        flash(f"Error: {e}", "danger")
+        print(f"--- CRITICAL booking error: {e} ---"); traceback.print_exc()
+        return redirect(url_for('dashboard_passenger', page='search', **search))
+    # END FIX
 
 @app.route('/passenger/booking/cancel', methods=['POST'])
 @login_required(role='Passenger')
@@ -794,3 +833,4 @@ def generic_add_maintenance_log():
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000, host='0.0.0.0') # Host 0.0.0.0 makes it accessible externally/in Docker
+

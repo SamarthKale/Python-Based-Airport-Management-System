@@ -680,7 +680,7 @@ WHERE r.role_name = 'Ground Staff';
 -- ATC
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.role_id, p.permission_id
-FROM roles r JOIN permissions p ON p.permission_key IN ('update_flights','view_reports')
+FROM roles r JOI  N permissions p ON p.permission_key IN ('update_flights','view_reports')
 WHERE r.role_name = 'ATC';
 
 -- Engineer

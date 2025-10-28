@@ -6,14 +6,18 @@ CREATE DATABASE airline_pro_db_v2;
 USE airline_pro_db_v2;
 
 -- ============================================
--- CORE TABLES
+-- CLEANUP PREVIOUS TABLES
 -- ============================================
 SET FOREIGN_KEY_CHECKS=0;
 DROP TABLE IF EXISTS archived_flights, passenger_loyalty_summary, flight_revenue_summary, route_performance, maintenance_history, aircraft_seats, role_permissions, permissions, roles, loyalty_tiers;
 DROP TABLE IF EXISTS admin, passenger, employee, aircraft, route, flight, booking, payment, vendor, staff_assignment, payroll, maintenance, audit_log;
 SET FOREIGN_KEY_CHECKS=1;
 
--- Admin table
+-- ============================================
+-- CORE TABLES
+-- ============================================
+
+-- 👨‍💼 Admin users (system managers)
 CREATE TABLE admin (
   admin_id INT AUTO_INCREMENT PRIMARY KEY,
   username VARCHAR(50) UNIQUE NOT NULL,
@@ -22,7 +26,7 @@ CREATE TABLE admin (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Passenger table
+-- 🧳 Passenger table (registered users)
 CREATE TABLE passenger (
   passenger_id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
@@ -35,7 +39,7 @@ CREATE TABLE passenger (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Roles and Permissions (RBAC)
+-- 🛡️ RBAC (Role-Based Access Control)
 CREATE TABLE roles (
   role_id INT AUTO_INCREMENT PRIMARY KEY,
   role_name VARCHAR(50) UNIQUE NOT NULL,
@@ -57,7 +61,7 @@ CREATE TABLE role_permissions (
   FOREIGN KEY (permission_id) REFERENCES permissions(permission_id) ON DELETE CASCADE
 );
 
--- Employee table
+-- 👷 Employee table
 CREATE TABLE employee (
   emp_id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
@@ -70,7 +74,7 @@ CREATE TABLE employee (
   FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE SET NULL
 );
 
--- Aircraft table
+-- ✈️ Aircraft table
 CREATE TABLE aircraft (
   aircraft_id INT AUTO_INCREMENT PRIMARY KEY,
   registration_no VARCHAR(50) UNIQUE,
@@ -81,7 +85,7 @@ CREATE TABLE aircraft (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Route table
+-- 🌍 Route table (from → to)
 CREATE TABLE route (
   route_id INT AUTO_INCREMENT PRIMARY KEY,
   source_code VARCHAR(10),
@@ -91,7 +95,7 @@ CREATE TABLE route (
   distance_km INT
 );
 
--- Flight table
+-- 🕒 Flight schedule and details
 CREATE TABLE flight (
   flight_id INT AUTO_INCREMENT PRIMARY KEY,
   flight_no VARCHAR(20) UNIQUE NOT NULL,
@@ -111,7 +115,7 @@ CREATE TABLE flight (
   FOREIGN KEY (aircraft_id) REFERENCES aircraft(aircraft_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
--- Booking and Payments
+-- 🎟️ Booking and Payments
 CREATE TABLE booking (
   booking_id INT AUTO_INCREMENT PRIMARY KEY,
   passenger_id INT,
@@ -136,7 +140,7 @@ CREATE TABLE payment (
   FOREIGN KEY (booking_id) REFERENCES booking(booking_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
--- Vendors / Amenities
+-- 🛍️ Vendors / Amenities
 CREATE TABLE vendor (
   vendor_id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(150),
@@ -146,7 +150,7 @@ CREATE TABLE vendor (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Staff Flight Assignments
+-- 👨‍✈️ Staff Assignments for flights
 CREATE TABLE staff_assignment (
   assignment_id INT AUTO_INCREMENT PRIMARY KEY,
   emp_id INT,
@@ -157,7 +161,7 @@ CREATE TABLE staff_assignment (
   FOREIGN KEY (flight_id) REFERENCES flight(flight_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
--- Payroll
+-- 💰 Payroll
 CREATE TABLE payroll (
   payroll_id INT AUTO_INCREMENT PRIMARY KEY,
   emp_id INT,
@@ -169,7 +173,7 @@ CREATE TABLE payroll (
   FOREIGN KEY (emp_id) REFERENCES employee(emp_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
--- Maintenance Logs
+-- 🔧 Maintenance
 CREATE TABLE maintenance (
   maintenance_id INT AUTO_INCREMENT PRIMARY KEY,
   aircraft_id INT,
@@ -181,7 +185,7 @@ CREATE TABLE maintenance (
   FOREIGN KEY (emp_id) REFERENCES employee(emp_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
--- Audit Logs
+-- 📜 Audit Logs (automated by triggers)
 CREATE TABLE audit_log (
   log_id INT AUTO_INCREMENT PRIMARY KEY,
   table_name VARCHAR(100),
@@ -192,7 +196,7 @@ CREATE TABLE audit_log (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Aircraft Seats
+-- 💺 Aircraft Seats Auto Generated
 CREATE TABLE aircraft_seats (
   seat_id INT AUTO_INCREMENT PRIMARY KEY,
   aircraft_id INT,
@@ -202,7 +206,7 @@ CREATE TABLE aircraft_seats (
   FOREIGN KEY (aircraft_id) REFERENCES aircraft(aircraft_id) ON DELETE CASCADE
 );
 
--- Loyalty Tiers
+-- 🏆 Loyalty Tier Configuration
 CREATE TABLE loyalty_tiers (
   tier_name VARCHAR(50) PRIMARY KEY,
   min_points INT,
@@ -210,13 +214,15 @@ CREATE TABLE loyalty_tiers (
   discount_percent INT
 );
 
--- Archived Flights
+-- 📦 Archived Flights (for data retention)
 CREATE TABLE archived_flights LIKE flight;
 
 -- ============================================
 -- FUNCTIONS
 -- ============================================
+
 DELIMITER //
+-- 🕓 Calculate flight duration
 CREATE FUNCTION flight_duration(dep DATETIME, arr DATETIME)
 RETURNS VARCHAR(20)
 DETERMINISTIC
@@ -229,6 +235,7 @@ BEGIN
   RETURN CONCAT(FLOOR(mins/60), 'h ', LPAD(MOD(mins,60),2,'0'),'m');
 END //
 
+-- 📏 Generate synthetic distance between airports
 CREATE FUNCTION calc_distance(src_code VARCHAR(10), dest_code VARCHAR(10))
 RETURNS INT
 DETERMINISTIC
@@ -240,7 +247,10 @@ DELIMITER ;
 -- ============================================
 -- TRIGGERS
 -- ============================================
+
 DELIMITER //
+
+-- Log passenger creation
 CREATE TRIGGER trg_audit_passenger_insert
 AFTER INSERT ON passenger
 FOR EACH ROW
@@ -249,6 +259,7 @@ BEGIN
     VALUES ('passenger', NEW.passenger_id, 'CREATE', CONCAT('New passenger: ', NEW.name), 'System');
 END //
 
+-- Log new flight creation
 CREATE TRIGGER trg_audit_flight_insert
 AFTER INSERT ON flight
 FOR EACH ROW
@@ -257,6 +268,7 @@ BEGIN
     VALUES ('flight', NEW.flight_id, 'CREATE', CONCAT('New flight: ', NEW.flight_no), 'Admin');
 END //
 
+-- Handle booking cancellations
 CREATE TRIGGER trg_audit_booking_update
 AFTER UPDATE ON booking
 FOR EACH ROW
@@ -271,6 +283,7 @@ BEGIN
     END IF;
 END //
 
+-- Auto dynamic fare adjustment
 CREATE TRIGGER trg_auto_fare_adjust
 AFTER INSERT ON booking
 FOR EACH ROW
@@ -299,6 +312,7 @@ BEGIN
     END IF;
 END //
 
+-- Initialize flight fare on insert
 CREATE TRIGGER trg_set_initial_fare
 BEFORE INSERT ON flight
 FOR EACH ROW
@@ -306,6 +320,7 @@ BEGIN
     SET NEW.current_fare = NEW.base_fare;
 END //
 
+-- Auto-generate seats after aircraft insertion
 CREATE TRIGGER trg_generate_aircraft_seats
 AFTER INSERT ON aircraft
 FOR EACH ROW
@@ -331,8 +346,12 @@ DELIMITER ;
 -- ============================================
 -- EVENT SCHEDULER
 -- ============================================
+
 SET GLOBAL event_scheduler = ON;
+
 DELIMITER //
+
+-- ⏱️ Auto-cancel expired or completed flights hourly
 CREATE EVENT IF NOT EXISTS evt_auto_cancel_flights
 ON SCHEDULE EVERY 1 HOUR
 DO
@@ -343,9 +362,8 @@ BEGIN
     UPDATE flight SET status = 'Completed'
     WHERE arrival_time < NOW() AND status IN ('Scheduled','Departed');
 END //
-DELIMITER ;
 
-DELIMITER //
+-- 🗃️ Archive completed flights daily
 CREATE EVENT IF NOT EXISTS evt_archive_completed_flights
 ON SCHEDULE EVERY 1 DAY
 DO
@@ -355,3 +373,173 @@ BEGIN
     DELETE FROM flight WHERE status = 'Completed';
 END //
 DELIMITER ;
+
+-- ============================================
+-- VIEWS (Data Insights)
+-- ============================================
+
+-- 👥 Passenger Loyalty Summary
+CREATE OR REPLACE VIEW passenger_loyalty_summary AS
+SELECT 
+    p.passenger_id,
+    p.name AS passenger_name,
+    COUNT(b.booking_id) AS total_bookings,
+    SUM(pay.amount) AS total_spent,
+    p.total_points,
+    CASE
+        WHEN p.total_points >= 50000 THEN 'Platinum'
+        WHEN p.total_points >= 25000 THEN 'Gold'
+        WHEN p.total_points >= 10000 THEN 'Silver'
+        ELSE 'Basic'
+    END AS loyalty_tier
+FROM passenger p
+LEFT JOIN booking b ON p.passenger_id = b.passenger_id
+LEFT JOIN payment pay ON b.booking_id = pay.booking_id
+GROUP BY p.passenger_id;
+
+-- 💸 Flight Revenue Summary
+CREATE OR REPLACE VIEW flight_revenue_summary AS
+SELECT 
+    f.flight_id,
+    f.flight_no,
+    r.source_code,
+    r.dest_code,
+    COUNT(b.booking_id) AS total_bookings,
+    SUM(pay.amount) AS total_revenue,
+    AVG(pay.amount) AS avg_ticket_price,
+    f.status
+FROM flight f
+LEFT JOIN route r ON f.route_id = r.route_id
+LEFT JOIN booking b ON f.flight_id = b.flight_id
+LEFT JOIN payment pay ON b.booking_id = pay.booking_id
+GROUP BY f.flight_id;
+
+-- 🛣️ Route Performance
+CREATE OR REPLACE VIEW route_performance AS
+SELECT 
+    r.route_id,
+    CONCAT(r.source_code, ' → ', r.dest_code) AS route,
+    COUNT(f.flight_id) AS total_flights,
+    SUM(pay.amount) AS total_revenue,
+    AVG(f.delay_minutes) AS avg_delay_minutes
+FROM route r
+LEFT JOIN flight f ON r.route_id = f.route_id
+LEFT JOIN booking b ON f.flight_id = b.flight_id
+LEFT JOIN payment pay ON b.booking_id = pay.booking_id
+GROUP BY r.route_id;
+
+-- 🧰 Maintenance History Summary
+CREATE OR REPLACE VIEW maintenance_history AS
+SELECT 
+    m.maintenance_id,
+    a.registration_no AS aircraft,
+    e.name AS technician,
+    m.maintenance_date,
+    m.notes
+FROM maintenance m
+LEFT JOIN aircraft a ON m.aircraft_id = a.aircraft_id
+LEFT JOIN employee e ON m.emp_id = e.emp_id;
+
+
+-- ============================================
+-- 🧮 UTILITY & MAINTENANCE FUNCTIONS
+-- ============================================
+DELIMITER //
+
+-- 1️⃣ Predict Next Maintenance Date for an Aircraft
+-- This estimates when the next maintenance is due
+-- based on the last maintenance date and total flight hours.
+CREATE FUNCTION predict_next_maintenance(
+    last_maint_date DATETIME,
+    flight_hours INT
+)
+RETURNS DATETIME
+DETERMINISTIC
+BEGIN
+    DECLARE interval_days INT;
+    -- Basic heuristic: 100 hours ≈ 30 days maintenance cycle
+    SET interval_days = (flight_hours / 100) * 30;
+    RETURN DATE_ADD(last_maint_date, INTERVAL interval_days DAY);
+END //
+
+-- 2️⃣ Calculate Aircraft Utilization %
+-- Returns how much capacity of an aircraft is utilized on a given flight.
+CREATE FUNCTION aircraft_utilization(
+    flight_id_input INT
+)
+RETURNS DECIMAL(5,2)
+DETERMINISTIC
+BEGIN
+    DECLARE v_capacity INT;
+    DECLARE v_booked INT;
+    DECLARE utilization DECIMAL(5,2);
+
+    SELECT ac.capacity INTO v_capacity
+    FROM aircraft ac
+    JOIN flight f ON ac.aircraft_id = f.aircraft_id
+    WHERE f.flight_id = flight_id_input;
+
+    SELECT COUNT(*) INTO v_booked
+    FROM booking
+    WHERE flight_id = flight_id_input AND status = 'Confirmed';
+
+    IF v_capacity = 0 OR v_capacity IS NULL THEN
+        RETURN 0;
+    END IF;
+
+    SET utilization = (v_booked / v_capacity) * 100;
+    RETURN ROUND(utilization, 2);
+END //
+
+-- 3️⃣ Calculate Passenger Loyalty Points Earned
+-- Based on ticket amount and flight distance, returns points earned.
+CREATE FUNCTION calc_loyalty_points(
+    ticket_amount DECIMAL(10,2),
+    distance_km INT
+)
+RETURNS INT
+DETERMINISTIC
+BEGIN
+    DECLARE points INT;
+    -- 1 point per ₹100 spent + 0.5 point per 100 km
+    SET points = FLOOR(ticket_amount / 100) + FLOOR(distance_km / 200);
+    RETURN points;
+END //
+
+-- 4️⃣ Maintenance Status Summary (Text Report)
+-- Returns a human-readable summary for maintenance status.
+CREATE FUNCTION maintenance_status_summary(
+    aircraft_id_input INT
+)
+RETURNS VARCHAR(255)
+DETERMINISTIC
+BEGIN
+    DECLARE v_model VARCHAR(100);
+    DECLARE v_last DATETIME;
+    DECLARE v_days INT;
+    DECLARE status VARCHAR(255);
+
+    SELECT model, last_maintenance INTO v_model, v_last
+    FROM aircraft WHERE aircraft_id = aircraft_id_input;
+
+    IF v_last IS NULL THEN
+        RETURN CONCAT('Aircraft ', v_model, ' has no maintenance record.');
+    END IF;
+
+    SET v_days = DATEDIFF(NOW(), v_last);
+
+    IF v_days < 30 THEN
+        SET status = 'Excellent - Recently maintained';
+    ELSEIF v_days < 90 THEN
+        SET status = 'Moderate - Check soon';
+    ELSE
+        SET status = 'Critical - Maintenance overdue';
+    END IF;
+
+    RETURN CONCAT('Aircraft ', v_model, ': ', status, ' (', v_days, ' days since last maintenance)');
+END //
+DELIMITER ;
+
+-- ============================================
+-- ✅ END OF SCHEMA
+-- ============================================
